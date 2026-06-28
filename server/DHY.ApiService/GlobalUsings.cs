@@ -1,0 +1,10 @@
+global using DHY.Core;
+global using DHY.Core.Option.RemoteRequest;
+global using DHY.Core.RemoteRequest;
+global using Furion;
+global using Furion.RemoteRequest;
+global using Microsoft.AspNetCore.Builder;
+global using Microsoft.AspNetCore.Hosting;
+global using Microsoft.Extensions.DependencyInjection;
+global using Microsoft.Extensions.Options;
+global using System.Reflection;

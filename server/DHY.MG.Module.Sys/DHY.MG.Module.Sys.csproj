@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Folder Include="Const\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.6" />
+    <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DHY.ApiService\DHY.InternalApiService.csproj" />
+    <ProjectReference Include="..\DHY.DDCS.Module.Core\DHY.DDCS.Module.Core.csproj" />
+    <ProjectReference Include="..\DHY.FrameWork.Application\DHY.FrameWork.Application.csproj" />
+    <ProjectReference Include="..\DHY.FrameWork.Core\DHY.FrameWork.Core.csproj" />
+    <ProjectReference Include="..\DHY.FrameWork.Data.SqlSugar\DHY.FrameWork.Data.SqlSugar.csproj" />
+  </ItemGroup>
+
+</Project>

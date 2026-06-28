@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DHY.Game.Core\DHY.Game.Core.csproj" />
+    <ProjectReference Include="..\DHY.Game.AI\DHY.Game.AI.csproj" />
+  </ItemGroup>
+
+</Project>

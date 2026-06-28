@@ -1,0 +1,55 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <NoWarn>1701;1702;1591;8632</NoWarn>
+    <DocumentationFile></DocumentationFile>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PreserveCompilationContext>true</PreserveCompilationContext>
+    <Nullable>disable</Nullable>
+    <GenerateDocumentationFile>True</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="DHY.Core.xml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AlibabaCloud.SDK.Dysmsapi20170525" Version="3.0.0" />
+    <PackageReference Include="AngleSharp" Version="1.1.2" />
+    <PackageReference Include="AspectCore.Extensions.Reflection" Version="2.4.0" />
+    <PackageReference Include="AspNet.Security.OAuth.Gitee" Version="8.1.0" />
+    <PackageReference Include="AspNet.Security.OAuth.Weixin" Version="8.1.0" />
+    <PackageReference Include="AspNetCoreRateLimit" Version="5.0.0" />
+    <PackageReference Include="Furion.Extras.Authentication.JwtBearer" Version="4.9.5.3" />
+    <PackageReference Include="Furion.Pure" Version="4.9.5.3" />
+    <PackageReference Include="IPTools.China" Version="1.6.0" />
+    <PackageReference Include="Lazy.Captcha.Core" Version="2.0.8" />
+    <PackageReference Include="Magicodes.IE.Excel" Version="2.7.5.1" />
+    <PackageReference Include="Magicodes.IE.Pdf" Version="2.7.5.1" />
+    <PackageReference Include="MailKit" Version="4.7.1.1" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.NewtonsoftJson" Version="8.0.8" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.NewtonsoftJson" Version="8.0.8" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" Version="8.0.8" />
+    <PackageReference Include="NEST" Version="7.17.5" />
+    <PackageReference Include="NewLife.Redis" Version="5.7.2024.801" />
+    <PackageReference Include="OnceMi.AspNetCore.OSS" Version="1.2.0" />
+    <PackageReference Include="QuikGraph" Version="2.5.0" />
+    <PackageReference Include="SixLabors.ImageSharp.Web" Version="3.1.3" />
+    <PackageReference Include="SKIT.FlurlHttpClient.Wechat.Api" Version="3.4.0" />
+    <PackageReference Include="SKIT.FlurlHttpClient.Wechat.TenpayV3" Version="3.7.0" />
+    <PackageReference Include="UAParser" Version="3.1.47" />
+    <PackageReference Include="Yitter.IdGenerator" Version="1.0.14" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.StackExchangeRedis" Version="8.0.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Service\File\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DHY.FrameWork.Data.SqlSugar\DHY.FrameWork.Data.SqlSugar.csproj" />
+    <ProjectReference Include="..\DHY.IO\DHY.IO.csproj" />
+  </ItemGroup>
+	
+</Project>

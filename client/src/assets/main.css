@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+/* 游戏自定义字体 */
+@layer base {
+  :root {
+    --color-primary: #6366f1;
+    --color-primary-dark: #4f46e5;
+    --font-narrative: 'Georgia', 'Noto Serif SC', serif;
+  }
+
+  body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    overscroll-behavior: none;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* 叙事文字区字体 */
+.narrative-text {
+  font-family: var(--font-narrative);
+  line-height: 1.8;
+  letter-spacing: 0.02em;
+  white-space: pre-line;
+  text-indent: 2em;
+}
+
+/* 居中叙事取消首行缩进 */
+.narrative-text.text-center {
+  text-indent: 0;
+}
+
+/* 打字机效果 */
+.typewriter-cursor::after {
+  content: '▌';
+  animation: blink 1s step-end infinite;
+  color: #6366f1;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* 骰子滚动动画 */
+@keyframes dice-roll {
+  0% { transform: rotate(0deg) scale(1); }
+  25% { transform: rotate(90deg) scale(1.1); }
+  50% { transform: rotate(180deg) scale(1); }
+  75% { transform: rotate(270deg) scale(1.1); }
+  100% { transform: rotate(360deg) scale(1); }
+}
+
+.dice-rolling {
+  animation: dice-roll 0.6s ease-in-out;
+}
+
+/* HP条渐变动画 */
+.hp-bar-transition {
+  transition: width 0.8s ease-in-out, background-color 0.5s ease;
+}
+
+/* 淡入动画 */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+  animation: fade-in 0.5s ease-out forwards;
+}
+
+/* 文字逐渐显现 */
+@keyframes text-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.text-reveal {
+  animation: text-reveal 0.3s ease-in forwards;
+}
+
+/* 滚动条美化 */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 2px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #4b5563;
+}
+
+/* 安全区域适配 */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}

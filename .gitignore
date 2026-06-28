@@ -1,0 +1,91 @@
+# ===========================
+# Dependencies
+# ===========================
+node_modules/
+**/node_modules/
+
+# ===========================
+# Build outputs
+# ===========================
+dist/
+**/dist/
+build/
+**/build/
+
+# ===========================
+# .NET / C# build artifacts
+# ===========================
+**/bin/
+**/obj/
+**/.vs/
+*.dll
+*.exe
+*.pdb
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# ===========================
+# Logs
+# ===========================
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ===========================
+# IDE / Editor
+# ===========================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ===========================
+# OS files
+# ===========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===========================
+# Secrets & Configuration
+# ===========================
+# 含真实密码/密钥的配置文件（数据库、JWT、API Key等）
+server/DHY.FrameWork.Application/Configuration/
+server/DHY.DDCS.Prescription/Configuration/
+server/DHY.FrameWork.Application/Configuration-default-bak.zip
+
+# AI 提示词模板（核心业务资产，不公开）
+server/DHY.Game.AI/Prompts/Templates/
+
+.env.local
+.env.*.local
+*.pfx
+*.publishsettings
+
+# 环境文件（含内网IP/服务地址）
+.env
+.env.*
+
+# 构建日志
+build-error.txt
+msbuild.log
+
+# ===========================
+# Misc artifacts
+# ===========================
+*.zip
+*.bak
+*.cache
+stats.html
+**/lib/**/dist/
+
+# ===========================
+# Package lock (optional, can be committed if needed)
+# ===========================
+# package-lock.json

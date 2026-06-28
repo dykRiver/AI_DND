@@ -1,0 +1,34 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <GenerateDocumentationFile>False</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <NoWarn>1701;1702;1591;8632</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <NoWarn>1701;1702;1591;8632</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="Interceptor\**" />
+    <EmbeddedResource Remove="Interceptor\**" />
+    <None Remove="Interceptor\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DHY.Core\DHY.Core.csproj" />
+    <ProjectReference Include="..\DHY.DDCS.Module.Core\DHY.DDCS.Module.Core.csproj" />
+    <ProjectReference Include="..\DHY.FrameWork.Application\DHY.FrameWork.Application.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Utils\" />
+  </ItemGroup>
+
+</Project>

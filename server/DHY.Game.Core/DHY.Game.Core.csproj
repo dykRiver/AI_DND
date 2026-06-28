@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DHY.Game.AI" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DHY.FrameWork.Data.SqlSugar\DHY.FrameWork.Data.SqlSugar.csproj" />
+    <ProjectReference Include="..\DHY.FrameWork.Core\DHY.FrameWork.Core.csproj" />
+    <ProjectReference Include="..\DHY.Core\DHY.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+  </ItemGroup>
+
+</Project>

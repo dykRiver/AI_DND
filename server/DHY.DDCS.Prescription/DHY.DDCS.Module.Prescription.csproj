@@ -1,0 +1,43 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <GenerateDocumentationFile>True</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <NoWarn>1701;1702;1591;8632</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <NoWarn>1701;1702;1591;8632</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="DomainService\**" />
+    <EmbeddedResource Remove="DomainService\**" />
+    <None Remove="DomainService\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Configuration\" />
+    <Folder Include="EventHandler\" />
+    <Folder Include="Job\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DHY.ApiService\DHY.InternalApiService.csproj" />
+    <ProjectReference Include="..\DHY.DDCS.Module.Core\DHY.DDCS.Module.Core.csproj" />
+    <ProjectReference Include="..\DHY.FrameWork.CommonService\DHY.FrameWork.CommonService.csproj" />
+    <ProjectReference Include="..\DHY.FrameWork.Core\DHY.FrameWork.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Configuration\Prescription.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

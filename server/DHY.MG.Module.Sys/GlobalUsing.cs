@@ -1,0 +1,9 @@
+﻿global using System.ComponentModel;
+global using DHY.Core;
+global using Furion.DependencyInjection;
+global using Furion.DynamicApiController;
+global using Mapster;
+global using Microsoft.AspNetCore.Mvc;
+global using SqlSugar;
+global using Microsoft.Extensions.DependencyInjection;
+global using Furion;

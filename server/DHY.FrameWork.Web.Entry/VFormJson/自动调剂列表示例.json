@@ -1,0 +1,1093 @@
+{
+  "widgetList": [
+    {
+      "key": 106117,
+      "type": "static-text",
+      "icon": "static-text",
+      "formItemFlag": false,
+      "options": {
+        "name": "statictext34210",
+        "columnWidth": "200px",
+        "hidden": true,
+        "textContent": "《！==============================================================================自动调剂列表页=======================================================》",
+        "textAlign": "left",
+        "fontSize": "13px",
+        "preWrap": false,
+        "customClass": [],
+        "onCreated": "",
+        "onMounted": "",
+        "label": "static-text"
+      },
+      "id": "statictext34210"
+    },
+    {
+      "key": 34260,
+      "type": "grid",
+      "alias": "column-2-grid",
+      "category": "container",
+      "icon": "column-2-grid",
+      "cols": [
+        {
+          "type": "grid-col",
+          "category": "container",
+          "icon": "grid-col",
+          "internal": true,
+          "widgetList": [
+            {
+              "key": 40384,
+              "type": "card",
+              "category": "container",
+              "icon": "card",
+              "widgetList": [
+                {
+                  "key": 104892,
+                  "type": "tree",
+                  "icon": "tree",
+                  "category": "container",
+                  "widgetList": [],
+                  "options": {
+                    "name": "treePre",
+                    "label": "煎药区域列表",
+                    "filter": false,
+                    "draggable": false,
+                    "defaultExpandAllNode": false,
+                    "selectClearAllNode": true,
+                    "expandRetractAllNode": false,
+                    "showCheckBox": false,
+                    "expandOnClickNode": true,
+                    "lazy": false,
+                    "treeDataEdit": true,
+                    "checkStrictly": false,
+                    "nodeEdit": false,
+                    "size": "default",
+                    "disabled": false,
+                    "hidden": false,
+                    "dsEnabled": false,
+                    "dsName": "prescriptionTree",
+                    "dataSetName": "",
+                    "customClass": [
+                      "nobuttongroup",
+                      "treeHeight700"
+                    ],
+                    "onCreated": "",
+                    "onMounted": "",
+                    "onNodeClick": "display(this,data)\n",
+                    "onNodeCheck": "",
+                    "onNodeContextmenu": "",
+                    "onCheckChange": "",
+                    "treeData": [
+                      {
+                        "label": "张三-20230011[代]",
+                        "water": 3000,
+                        "packcount": 14,
+                        "children": [
+                          {
+                            "label": "先煎-20231008",
+                            "children": null
+                          },
+                          {
+                            "label": "群药-20231009",
+                            "children": null
+                          },
+                          {
+                            "label": "后下-20231007",
+                            "children": null
+                          }
+                        ]
+                      },
+                      {
+                        "label": "张三-20230011[代]",
+                        "children": [
+                          {
+                            "label": "先煎-20231008",
+                            "children": null
+                          },
+                          {
+                            "label": "群药-20231009",
+                            "children": null
+                          },
+                          {
+                            "label": "后下-20231007",
+                            "children": null
+                          }
+                        ]
+                      },
+                      {
+                        "label": "张三-20230011[代]",
+                        "children": [
+                          {
+                            "label": "先煎-20231008",
+                            "children": null
+                          },
+                          {
+                            "label": "群药-20231009",
+                            "children": null
+                          },
+                          {
+                            "label": "后下-20231007",
+                            "children": null
+                          }
+                        ]
+                      },
+                      {
+                        "label": "张三-20230011[代]",
+                        "children": [
+                          {
+                            "label": "先煎-20231008"
+                          },
+                          {
+                            "label": "群药-20231009"
+                          },
+                          {
+                            "label": "后下-20231007"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "id": "tree72228"
+                }
+              ],
+              "options": {
+                "name": "card9405",
+                "label": "自动调剂处方列表",
+                "hidden": false,
+                "headerHidden": false,
+                "folded": false,
+                "showFold": false,
+                "cardWidth": "100%",
+                "shadow": "never",
+                "customClass": [
+                  "padding-1"
+                ]
+              },
+              "id": "card9405"
+            }
+          ],
+          "options": {
+            "name": "gridCol96629",
+            "hidden": false,
+            "span": 4,
+            "offset": 0,
+            "push": 0,
+            "pull": 0,
+            "responsive": false,
+            "md": 12,
+            "sm": 12,
+            "xs": 12,
+            "customClass": []
+          },
+          "id": "grid-col-96629"
+        },
+        {
+          "type": "grid-col",
+          "category": "container",
+          "icon": "grid-col",
+          "internal": true,
+          "widgetList": [
+            {
+              "key": 62795,
+              "type": "step",
+              "icon": "button-group",
+              "category": "container",
+              "widgetList": [],
+              "options": {
+                "name": "stepMain",
+                "space": "",
+                "direction": "horizontal",
+                "active": 2,
+                "processstatus": "success",
+                "finishstatus": "success",
+                "aligncenter": false,
+                "simple": true,
+                "steps": [
+                  {
+                    "title": "发锅",
+                    "description": "",
+                    "status": "finish"
+                  },
+                  {
+                    "title": "调剂",
+                    "description": "",
+                    "status": "process"
+                  },
+                  {
+                    "title": "处方复核",
+                    "description": "",
+                    "status": "wait"
+                  }
+                ],
+                "customClass": [
+                  "borderL",
+                  "borderR",
+                  "borderT",
+                  "borderRR",
+                  "borderB"
+                ],
+                "onCreated": "",
+                "onMounted": ""
+              },
+              "id": "step47863"
+            },
+            {
+              "key": 94262,
+              "type": "step",
+              "icon": "button-group",
+              "category": "container",
+              "widgetList": [],
+              "options": {
+                "name": "stepStation",
+                "space": "",
+                "direction": "horizontal",
+                "active": 10,
+                "processstatus": "process",
+                "finishstatus": "finish",
+                "aligncenter": false,
+                "simple": false,
+                "steps": [
+                  {
+                    "title": "1001",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2001",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2002",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2003",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2004",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2005",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2006",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2007",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2008",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2009",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2010",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2011",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2012",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2013",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2014",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2015",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2016",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2017",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2018",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2019",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2020",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2021",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2022",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2023",
+                    "description": "",
+                    "status": ""
+                  },
+                  {
+                    "title": "2024",
+                    "description": "",
+                    "status": ""
+                  }
+                ],
+                "customClass": [
+                  "borderL",
+                  "borderR",
+                  "padding5"
+                ],
+                "onCreated": "",
+                "onMounted": ""
+              },
+              "id": "step80538"
+            },
+            {
+              "key": 25306,
+              "type": "tab",
+              "category": "container",
+              "icon": "tab",
+              "tabs": [
+                {
+                  "type": "tab-pane",
+                  "category": "container",
+                  "icon": "tab-pane",
+                  "internal": true,
+                  "widgetList": [
+                    {
+                      "key": 103961,
+                      "type": "grid",
+                      "alias": "column-1-grid",
+                      "category": "container",
+                      "icon": "column-1-grid",
+                      "cols": [
+                        {
+                          "type": "grid-col",
+                          "category": "container",
+                          "icon": "grid-col",
+                          "internal": true,
+                          "widgetList": [
+                            {
+                              "key": 93968,
+                              "type": "timeline",
+                              "icon": "alert",
+                              "category": "container",
+                              "widgetList": [],
+                              "options": {
+                                "name": "tStack",
+                                "timelineitems": [
+                                  {
+                                    "content": "任务下发到设备：01号发框机",
+                                    "timestamp": "2023/11/27 11:11:11",
+                                    "hidetimestamp": false,
+                                    "center": false,
+                                    "placement": "top",
+                                    "type": "",
+                                    "color": "",
+                                    "size": "normal",
+                                    "icon": "",
+                                    "hollow": false
+                                  },
+                                  {
+                                    "content": "01号发框机完成发框",
+                                    "timestamp": "2023/11/27 11:11:19",
+                                    "hidetimestamp": false,
+                                    "center": false,
+                                    "placement": "top",
+                                    "type": "",
+                                    "color": "#0bbd87",
+                                    "size": "normal",
+                                    "icon": "",
+                                    "hollow": false
+                                  },
+                                  {
+                                    "content": "调剂框到达RC001扫码工位",
+                                    "timestamp": "2023/11/27 11:11:11",
+                                    "hidetimestamp": false,
+                                    "center": false,
+                                    "placement": "top",
+                                    "type": "",
+                                    "color": "",
+                                    "size": "normal",
+                                    "icon": "",
+                                    "hollow": false
+                                  },
+                                  {
+                                    "content": "RC001扫码成功，框号【TJK00000001】",
+                                    "timestamp": "2023/11/27 11:11:11",
+                                    "hidetimestamp": false,
+                                    "center": false,
+                                    "placement": "top",
+                                    "type": "",
+                                    "color": "#0bbd87",
+                                    "size": "normal",
+                                    "icon": "",
+                                    "hollow": false
+                                  },
+                                  {
+                                    "content": "框方绑定成功",
+                                    "timestamp": "2023/11/27 11:11:11",
+                                    "hidetimestamp": false,
+                                    "center": false,
+                                    "placement": "top",
+                                    "type": "",
+                                    "color": "#0bbd87",
+                                    "size": "normal",
+                                    "icon": "",
+                                    "hollow": false
+                                  }
+                                ],
+                                "customClass": ""
+                              },
+                              "id": "timeline57718"
+                            }
+                          ],
+                          "options": {
+                            "name": "gridCol32888",
+                            "hidden": false,
+                            "span": 7,
+                            "offset": 0,
+                            "push": 0,
+                            "pull": 0,
+                            "responsive": false,
+                            "md": 12,
+                            "sm": 12,
+                            "xs": 12,
+                            "customClass": []
+                          },
+                          "id": "grid-col-32888"
+                        },
+                        {
+                          "type": "grid-col",
+                          "category": "container",
+                          "icon": "grid-col",
+                          "internal": true,
+                          "widgetList": [
+                            {
+                              "key": 93968,
+                              "type": "timeline",
+                              "icon": "alert",
+                              "category": "container",
+                              "widgetList": [],
+                              "options": {
+                                "name": "tDisp",
+                                "timelineitems": [
+                                  {
+                                    "content": "到达2001，调剂：人参、桂枝、王不留行、肤小麦、金英子、覆盆子、桑瞟梢",
+                                    "timestamp": "2023/11/27 11:11:11",
+                                    "hidetimestamp": false,
+                                    "center": false,
+                                    "placement": "top",
+                                    "type": "",
+                                    "color": "",
+                                    "size": "normal",
+                                    "icon": "",
+                                    "hollow": false
+                                  },
+                                  {
+                                    "content": "站台2001调剂落药完成，本次落药8味",
+                                    "timestamp": "2023/11/27 11:11:11",
+                                    "hidetimestamp": false,
+                                    "center": false,
+                                    "placement": "top",
+                                    "type": "",
+                                    "color": "#0bbd87",
+                                    "size": "normal",
+                                    "icon": "",
+                                    "hollow": false
+                                  },
+                                  {
+                                    "content": "到达2002，调剂：人参、桂枝、王不留行、肤小麦、金英子、覆盆子、桑瞟梢",
+                                    "timestamp": "2023/11/27 11:11:11",
+                                    "hidetimestamp": false,
+                                    "center": false,
+                                    "placement": "top",
+                                    "type": "",
+                                    "color": "",
+                                    "size": "normal",
+                                    "icon": "",
+                                    "hollow": false
+                                  },
+                                  {
+                                    "content": "站台2002调剂落药完成，本次落药8味",
+                                    "timestamp": "2023/11/27 11:11:11",
+                                    "hidetimestamp": false,
+                                    "center": false,
+                                    "placement": "top",
+                                    "type": "",
+                                    "color": "#0bbd87",
+                                    "size": "normal",
+                                    "icon": "",
+                                    "hollow": false
+                                  },
+                                  {
+                                    "content": "到达2003，调剂：人参、桂枝、王不留行、肤小麦、金英子、覆盆子、桑瞟梢",
+                                    "timestamp": "2023/11/27 11:11:11",
+                                    "hidetimestamp": false,
+                                    "center": false,
+                                    "placement": "top",
+                                    "type": "",
+                                    "color": "",
+                                    "size": "normal",
+                                    "icon": "",
+                                    "hollow": false
+                                  },
+                                  {
+                                    "content": "站台2003调剂落药完成，本次落药8味",
+                                    "timestamp": "2023/11/27 11:11:11",
+                                    "hidetimestamp": false,
+                                    "center": false,
+                                    "placement": "top",
+                                    "type": "",
+                                    "color": "#0bbd87",
+                                    "size": "normal",
+                                    "icon": "",
+                                    "hollow": false
+                                  },
+                                  {
+                                    "content": "到达2004，调剂：人参、桂枝、王不留行、肤小麦、金英子、覆盆子、桑瞟梢",
+                                    "timestamp": "2023/11/27 11:11:11",
+                                    "hidetimestamp": false,
+                                    "center": false,
+                                    "placement": "top",
+                                    "type": "",
+                                    "color": "",
+                                    "size": "normal",
+                                    "icon": "",
+                                    "hollow": false
+                                  },
+                                  {
+                                    "content": "站台2004调剂落药完成，本次落药8味",
+                                    "timestamp": "2023/11/27 11:11:11",
+                                    "hidetimestamp": false,
+                                    "center": false,
+                                    "placement": "top",
+                                    "type": "",
+                                    "color": "#0bbd87",
+                                    "size": "normal",
+                                    "icon": "",
+                                    "hollow": false
+                                  }
+                                ],
+                                "customClass": []
+                              },
+                              "id": "timeline102608"
+                            }
+                          ],
+                          "options": {
+                            "name": "gridCol114789",
+                            "hidden": false,
+                            "span": 10,
+                            "offset": 0,
+                            "push": 0,
+                            "pull": 0,
+                            "responsive": false,
+                            "md": 12,
+                            "sm": 12,
+                            "xs": 12,
+                            "customClass": ""
+                          },
+                          "id": "grid-col-114789"
+                        },
+                        {
+                          "type": "grid-col",
+                          "category": "container",
+                          "icon": "grid-col",
+                          "internal": true,
+                          "widgetList": [
+                            {
+                              "key": 93968,
+                              "type": "timeline",
+                              "icon": "alert",
+                              "category": "container",
+                              "widgetList": [],
+                              "options": {
+                                "name": "tReCheck",
+                                "timelineitems": [
+                                  {
+                                    "content": "到达处方复核工位：复核01",
+                                    "timestamp": "2023/11/27 11:11:11",
+                                    "hidetimestamp": false,
+                                    "center": false,
+                                    "placement": "top",
+                                    "type": "",
+                                    "color": "",
+                                    "size": "normal",
+                                    "icon": "",
+                                    "hollow": false
+                                  },
+                                  {
+                                    "content": "复核员【康熙】复核中...",
+                                    "timestamp": "2023/11/27 11:11:11",
+                                    "hidetimestamp": false,
+                                    "center": false,
+                                    "placement": "top",
+                                    "type": "",
+                                    "color": "",
+                                    "size": "normal",
+                                    "icon": "",
+                                    "hollow": false
+                                  },
+                                  {
+                                    "content": "处方复核：通过，调剂重量复核：1%【通过】",
+                                    "timestamp": "2023/11/27 11:11:11",
+                                    "hidetimestamp": false,
+                                    "center": false,
+                                    "placement": "top",
+                                    "type": "",
+                                    "color": "#0bbd87",
+                                    "size": "normal",
+                                    "icon": "",
+                                    "hollow": false
+                                  }
+                                ],
+                                "customClass": []
+                              },
+                              "id": "timeline83553"
+                            }
+                          ],
+                          "options": {
+                            "name": "gridCol105073",
+                            "hidden": false,
+                            "span": 7,
+                            "offset": 0,
+                            "push": 0,
+                            "pull": 0,
+                            "responsive": false,
+                            "md": 12,
+                            "sm": 12,
+                            "xs": 12,
+                            "customClass": ""
+                          },
+                          "id": "grid-col-105073"
+                        }
+                      ],
+                      "options": {
+                        "name": "grid89210",
+                        "hidden": false,
+                        "gutter": 12,
+                        "colHeight": null,
+                        "customClass": []
+                      },
+                      "id": "grid89210"
+                    }
+                  ],
+                  "options": {
+                    "name": "tab1",
+                    "label": "任务概览",
+                    "hidden": false,
+                    "active": false,
+                    "disabled": false,
+                    "customClass": ""
+                  },
+                  "id": "tab-pane-55610"
+                },
+                {
+                  "type": "tab-pane",
+                  "category": "container",
+                  "icon": "tab-pane",
+                  "internal": true,
+                  "widgetList": [
+                    {
+                      "key": 16062,
+                      "type": "data-table",
+                      "category": "container",
+                      "icon": "data-table",
+                      "widgetList": [],
+                      "options": {
+                        "name": "dispDetailTable",
+                        "label": "data-table",
+                        "hidden": false,
+                        "rowSpacing": 3,
+                        "tableHeight": "500",
+                        "tableWidth": "100%",
+                        "customClass": [],
+                        "stripe": false,
+                        "showIndex": false,
+                        "showCheckBox": false,
+                        "showPagination": false,
+                        "paginationAlign": "left",
+                        "smallPagination": false,
+                        "showSummary": false,
+                        "border": true,
+                        "tableSize": "default",
+                        "autoColumnWidthDisabled": false,
+                        "tableColumns": [
+                          {
+                            "columnId": 2,
+                            "prop": "name",
+                            "label": "饮片名称",
+                            "width": "100",
+                            "show": true,
+                            "align": "left",
+                            "formatS": "",
+                            "fixed": "left",
+                            "render": "let {row, column} = params\nlet cellValue = row[column.prop] || ''\n\nreturn h(components.ElLink, {\n    type:'primary',\n    href:'#',\n    underline:true\n  },cellValue\n)\n"
+                          },
+                          {
+                            "columnId": 4,
+                            "prop": "status",
+                            "label": "状态",
+                            "width": "80",
+                            "show": true,
+                            "align": "left",
+                            "formatS": "render",
+                            "fixed": "",
+                            "render": "\n  let {row, column} = params\nlet cellValue = row[column.prop]\nvar tagItems=[{des:'未知'},{des:'等待',type:''},{des:'已下发',type:'info'},{des:'调剂中',type:'warning'},{des:'调剂完成',type:'success'},{des:'开关中',type:'danger'}]\nvar targetItem=tagItems[cellValue]\nif(!targetItem){\n  return cellValue\n}\nlet effect='dark';\nif(cellValue==1){\n  effect='Plain'\n}\n\nreturn h(components.ElTag, {\n    modelValue: cellValue,\n    type:targetItem.type,\n    effect:effect,\n  },{default:()=>targetItem.des}\n)"
+                          },
+                          {
+                            "columnId": 1701155410143,
+                            "show": true,
+                            "prop": "dispensinger",
+                            "label": "调剂头",
+                            "width": "100",
+                            "formatS": "",
+                            "render": "let {row, column} = params\nlet cellValue = row[column.prop] || 0\n\nreturn cellValue + \"-\" + row.unitId + \"-\" +row.cellId"
+                          },
+                          {
+                            "columnId": 1701229142714,
+                            "show": true,
+                            "prop": "code",
+                            "label": "饮片代码",
+                            "width": "90"
+                          },
+                          {
+                            "columnId": 1701242637262,
+                            "show": true,
+                            "prop": "prescriptionWeight",
+                            "label": "处方重量",
+                            "width": "90"
+                          },
+                          {
+                            "columnId": 6,
+                            "prop": "weight",
+                            "label": "任务重量",
+                            "width": "90",
+                            "show": true,
+                            "align": "right",
+                            "sortable": false,
+                            "formatS": ""
+                          },
+                          {
+                            "columnId": 1699505186420,
+                            "show": true,
+                            "prop": "finalWeight",
+                            "label": "调剂重量",
+                            "width": "90",
+                            "formatS": "render",
+                            "render": "let {row, column} = params\nlet cellValue = row[column.prop] || ''\nlet presWeight=row.weight\nvar per=(cellValue-presWeight)/presWeight *100\nvar result=Math.abs(per)<=5.0\n\n/*\n\n欠调 --黄色\n正常 --绿色\n超调 --红色\n*/\nvar type='success';\nif(!result){\n  type = cellValue > presWeight ? 'danger':'warning'\n  \n}\n\nreturn h(components.ElTag, {\n    modelValue: cellValue,\n    type:type,\n    effect:'dark'\n  },{default:()=>cellValue}\n)\n"
+                          },
+                          {
+                            "columnId": 1701242713326,
+                            "show": true,
+                            "prop": "innerTaskNo",
+                            "label": "任务短号",
+                            "width": "90",
+                            "fixed": "left"
+                          },
+                          {
+                            "columnId": 1699505217751,
+                            "show": true,
+                            "label": "启用",
+                            "prop": "enabled",
+                            "width": "70",
+                            "formatS": "render",
+                            "render": "return params.row.enabled?'启用':'禁用'"
+                          },
+                          {
+                            "columnId": 1699505188341,
+                            "show": true,
+                            "prop": "description",
+                            "label": "描述",
+                            "width": "200"
+                          },
+                          {
+                            "columnId": 1699505216521,
+                            "show": true,
+                            "prop": "updateTime",
+                            "label": "更新时间",
+                            "formatS": "d4",
+                            "width": "120"
+                          }
+                        ],
+                        "showButtonsColumn": true,
+                        "buttonsColumnFixed": "right",
+                        "buttonsColumnTitle": "操作",
+                        "buttonsColumnWidth": 120,
+                        "operationButtons": [
+                          {
+                            "name": "opt",
+                            "label": "转人工",
+                            "type": "primary",
+                            "size": "small",
+                            "round": false,
+                            "hidden": false,
+                            "disabled": false
+                          }
+                        ],
+                        "pagination": {
+                          "currentPage": 1,
+                          "pageSizes": [
+                            10,
+                            15,
+                            20,
+                            30,
+                            50,
+                            100,
+                            200
+                          ],
+                          "pageSize": 20,
+                          "total": 366
+                        },
+                        "dsEnabled": false,
+                        "dsName": "",
+                        "dataSetName": "",
+                        "treeDataEnabled": true,
+                        "rowKey": "id",
+                        "childrenKey": "children",
+                        "tableData": [
+                          {
+                            "medName": "甘草",
+                            "taskNo": "10086",
+                            "status": 1,
+                            "name": "调剂头1-1-1",
+                            "weight": 100,
+                            "finalWeight": 99.6,
+                            "description": "无异常",
+                            "enabled": true,
+                            "updateTime": "11-09 12:41:00"
+                          },
+                          {
+                            "medName": "广东王不留行",
+                            "taskNo": "10086",
+                            "status": 2,
+                            "name": "调剂头1-1-2",
+                            "weight": 100,
+                            "finalWeight": 89.6,
+                            "description": "无异常",
+                            "enabled": true,
+                            "updateTime": "11-09 12:41:00"
+                          },
+                          {
+                            "medName": "甘草",
+                            "taskNo": "10086",
+                            "status": 3,
+                            "name": "调剂头1-1-3",
+                            "weight": 100,
+                            "finalWeight": 109.6,
+                            "description": "无异常",
+                            "enabled": true,
+                            "updateTime": "11-09 12:41:00"
+                          },
+                          {
+                            "medName": "甘草",
+                            "taskNo": "10086",
+                            "status": 4,
+                            "name": "调剂头1-2-1",
+                            "weight": 100,
+                            "finalWeight": 99.6,
+                            "description": "无异常",
+                            "enabled": true,
+                            "updateTime": "11-09 12:41:00"
+                          },
+                          {
+                            "medName": "甘草",
+                            "taskNo": "10086",
+                            "status": 5,
+                            "name": "调剂头1-2-2",
+                            "weight": 100,
+                            "finalWeight": 99.6,
+                            "description": "无异常",
+                            "enabled": true,
+                            "updateTime": "11-09 12:41:00"
+                          },
+                          {
+                            "medName": "甘草",
+                            "taskNo": "10086",
+                            "status": 1,
+                            "name": "调剂头1-2-3",
+                            "weight": 100,
+                            "finalWeight": 99.6,
+                            "description": "无异常",
+                            "enabled": true,
+                            "updateTime": "11-09 12:41:00"
+                          },
+                          {
+                            "medName": "甘草",
+                            "taskNo": "10086",
+                            "status": 1,
+                            "name": "调剂头1-3-1",
+                            "weight": 100,
+                            "finalWeight": 99.6,
+                            "description": "无异常",
+                            "enabled": true,
+                            "updateTime": "11-09 12:41:00"
+                          },
+                          {
+                            "medName": "甘草",
+                            "taskNo": "10086",
+                            "status": 4,
+                            "name": "调剂头1-3-2",
+                            "weight": 100,
+                            "finalWeight": 99.6,
+                            "description": "无异常",
+                            "enabled": true,
+                            "updateTime": "11-09 12:41:00"
+                          },
+                          {
+                            "medName": "甘草",
+                            "taskNo": "10086",
+                            "status": 1,
+                            "name": "调剂头1-3-3",
+                            "weight": 100,
+                            "finalWeight": 99.6,
+                            "description": "无异常",
+                            "enabled": true,
+                            "updateTime": "11-09 12:41:00"
+                          }
+                        ],
+                        "onCreated": "",
+                        "onMounted": "",
+                        "onPageSizeChange": "",
+                        "onCurrentPageChange": "",
+                        "onSortChange": "",
+                        "onSelectionChange": "",
+                        "onHideOperationButton": "",
+                        "onDisableOperationButton": "",
+                        "onGetOperationButtonLabel": "",
+                        "onOperationButtonClick": "",
+                        "onHeaderClick": "",
+                        "onRowClick": "",
+                        "onRowDoubleClick": "",
+                        "onCellClick": "",
+                        "onCellDoubleClick": "",
+                        "onGetRowClassName": "",
+                        "onGetSpanMethod": ""
+                      },
+                      "id": "datatable112952"
+                    }
+                  ],
+                  "options": {
+                    "name": "tab-pane-42054",
+                    "label": "调剂明细",
+                    "hidden": false,
+                    "active": true,
+                    "disabled": false,
+                    "customClass": ""
+                  },
+                  "id": "tab-pane-42054"
+                }
+              ],
+              "options": {
+                "name": "tab75711",
+                "tabType": "border-card",
+                "tabPosition": "top",
+                "hidden": false,
+                "customClass": [],
+                "onTabClick": ""
+              },
+              "id": "tab75711"
+            }
+          ],
+          "options": {
+            "name": "gridCol76555",
+            "hidden": false,
+            "span": 20,
+            "offset": 0,
+            "push": 0,
+            "pull": 0,
+            "responsive": false,
+            "md": 12,
+            "sm": 12,
+            "xs": 12,
+            "customClass": []
+          },
+          "id": "grid-col-76555"
+        }
+      ],
+      "options": {
+        "name": "grid17234",
+        "hidden": false,
+        "gutter": 12,
+        "colHeight": null,
+        "customClass": []
+      },
+      "id": "grid17234"
+    }
+  ],
+  "formConfig": {
+    "modelName": "formData",
+    "refName": "vForm",
+    "rulesName": "rules",
+    "labelWidth": 80,
+    "labelPosition": "left",
+    "size": "",
+    "labelAlign": "label-left-align",
+    "cssCode": ".padding-1 .el-card .el-card-body{\n  padding:0px;\n  margin-top: 0px !important;\n}\n\n\n.margin5{\n  \n  margin: 5px;\n}\n.nobuttongroup .el-button-group{\n  display: none;\n  \n}\n.borderL{\n  border-left: 1px #dcdfe6 solid ;\n}\n.borderR{\n  border-right:  1px #dcdfe6 solid ;\n}\n.borderT{\n  border-top: 1px #dcdfe6 solid ;\n}\n.borderB{\n  border-bottom: 1px #dcdfe6 solid ;\n}\n.borderRR{\n  border-radius: 3px;\n}\n.padding5{\n  padding: 8px;\n}\n.treeHeight700 .el-tree{\n  height: 610px;\n}",
+    "customClass": [],
+    "functions": "/*显示界面刷新*/\nfunction display(that,data){\n  let dispTable=that.getWidgetRef('dispDetailTable')\nlet stepMain=that.getWidgetRef('stepMain')\nlet tStack=that.getWidgetRef('tStack')\nlet tDisp=that.getWidgetRef('tDisp')\nlet tReCheck=that.getWidgetRef('tReCheck')\nlet stepStation=that.getWidgetRef('stepStation')\n\n//设置总步骤\n//发框：0-未知，1-空闲；2-已下发；3-发框完成；4-扫码完成；5-绑定完成\nlet unstackTask=data.unstackingTasks\nif(!unstackTask){\n  return\n}\nlet activeStep=1\nlet activeStation=1;\nif(unstackTask.status==5){\n  activeStep=2\n  activeStep=2\n}\n/*\n调剂状态：0-未知1-空闲；2-已下发；3-开始调剂；4-调剂完成；5-落药完成\n*/\nif(data.dispensingTasks.filter(s=>s.status<5).length==0){\n  activeStep=3\n  activeStation=25\n}\n/*\n复核状态：0-未知；1-空闲；2-框到达；3-复核完成\n*/\nif(data.prescriptionCheckTasks.status==3){\n  activeStep=0\n}\n//总步骤\nstepMain.setActiveStep(activeStep)\n//站台步骤\nstepStation.setActiveStep(activeStation)\n//设备调剂明细\ndispTable.setTableData(data.dispensingTasks)\n}\n\n/*\n调剂数据处理\n*/\n\nfunction parseTreeData(datas) {\n\tlet dataGroup = Object.groupBy(datas, (data) => data.prescriptionNo)\n\tlet treeDatas = []\n\tlet preTypes = ['未知', '代煎', '自煎', '膏方']\n\tlet decoctorTypes = ['未知', '先煎', '群药', '后下', '烊化', '单包']\n\tdebugger\n\tfor (var group in dataGroup) {\n\t\tlet pres = dataGroup[group]\n\t\tlet presCount = pres.length\n\t\tif (presCount == 0) {\n\t\t\tcontinue;\n\t\t}\n\t\tlet presNode = {\n\t\t\tlabel: pres[0].patientName + \"-\" + pres[0].prescriptionNo + \"[\" + preTypes[pres[0].prescriptType % 5] +\n\t\t\t\t\"]\",\n\t\t\tchildren: []\n\t\t};\n\t\tif (presCount == 1) {\n\t\t\t//无拆方\n\t\t\tlet pre = pres[0];\n\t\t\tpre.decoctionTasks.forEach(function(item, index, arr) {\n\t\t\t/*\n\t\t\t\tlet dispItems = pre.dispensingTasks.filter(s => s.taskNo == item.taskNo && s.taskIndex == item.taskIndex)\n\t\t\t\tlet medGroup = Object.groupBy(dispItems, (data) => data.code)\n\t\t\t\tlet dispGroupItems = []\n\t\t\t\tfor (var itemGroup in medGroup) {\n\t\t\t\t\tlet gItem = medGroup[itemGroup]\n\t\t\t\t\tif (gItem.length == 1) {\n\t\t\t\t\t\tdispGroupItems.push(gItem[0])\n\t\t\t\t\t} else {\n\t\t\t\t\t\tlet ggItems = gItem[0]\n\t\t\t\t\t\tggItems.children = []\n\t\t\t\t\t\tgItem.forEach(function(g, gi, ga) {\n\t\t\t\t\t\t\tggItems.children.push(g)\n\t\t\t\t\t\t})\n\t\t\t\t\t\tdispGroupItems.push(ggItems)\n\t\t\t\t\t}\n\t\t\t\t}*/\n\t\t\t\tlet node = {\n\t\t\t\t\tlabel: decoctorTypes[item.dispensingType] + \"-\" + item.taskNo + \"-\" + item.taskIndex,\n\t\t\t\t\tunstackingTasks: pre.unstackingTasks.find(s => s.taskNo == item.taskNo && s.taskIndex ==\n\t\t\t\t\t\titem.taskIndex),\n\t\t\t\t\tdispensingTasks: pre.dispensingTasks.filter(s => s.taskNo == item.taskNo && s.taskIndex == item.taskIndex),\n\t\t\t\t\tprescriptionCheckTasks: pre.prescriptionCheckTasks.find(s => s.taskNo == item.taskNo &&\n\t\t\t\t\t\ts.taskIndex == item.taskIndex),\n\t\t\t\t};\n\t\t\t\tpresNode.children.push(node);\n\t\t\t})\n\t\t} else {\n\t\t\tpres.forEach(function(pitem, pindex, parr) {\n\t\t\t\tlet cNode = {\n\t\t\t\t\tlabel: '拆方' + pitem.index,\n\t\t\t\t\tchildren: []\n\t\t\t\t}\n\t\t\t\tpitem.decoctionTasks.forEach(function(item, dindex, darr) {\n\t\t\t\t\tlet node = {\n\t\t\t\t\t\tlabel: decoctorTypes[item.dispensingType] + \"-\" + item.taskNo\n\t\t\t\t\t};\n\t\t\t\t\tcNode.children.push(node);\n\t\t\t\t})\n\t\t\t\tpresNode.children.push(cNode);\n\n\t\t\t})\n\n\t\t}\n\t\ttreeDatas.push(presNode);\n\t}\n\treturn treeDatas\n}\n",
+    "layoutType": "PC",
+    "jsonVersion": 3,
+    "dataSources": [
+      {
+        "dataSourceId": "ds20139",
+        "uniqueName": "prescriptionTree",
+        "requestURL": "http://101.89.143.247:84/api/prescription/allPrescription",
+        "requestURLType": "String",
+        "requestMethod": "get",
+        "description": "处方树",
+        "headers": [],
+        "params": [],
+        "data": [],
+        "configHandlerCode": "  return config",
+        "dataHandlerCode": "  let datas =result.data.data||[{}];\n  return \t\tparseTreeData(datas)",
+        "errorHandlerCode": "  $message.error(error.message);",
+        "dataSetEnabled": false,
+        "dataSets": []
+      }
+    ],
+    "onFormCreated": "",
+    "onFormMounted": "",
+    "onFormDataChange": "",
+    "onFormValidate": ""
+  }
+}

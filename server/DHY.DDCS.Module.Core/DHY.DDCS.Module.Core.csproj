@@ -1,0 +1,37 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <GenerateDocumentationFile>True</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <NoWarn>1701;1702;1591;8632</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <NoWarn>1701;1702;1591;8632</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="Consts\MqttEventHandlerNames\**" />
+    <EmbeddedResource Remove="Consts\MqttEventHandlerNames\**" />
+    <None Remove="Consts\MqttEventHandlerNames\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Yitter.IdGenerator" Version="1.0.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DHY.Core\DHY.Core.csproj" />
+    <ProjectReference Include="..\DHY.FrameWork.Common\DHY.FrameWork.Common.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Interface\" />
+  </ItemGroup>
+
+</Project>
