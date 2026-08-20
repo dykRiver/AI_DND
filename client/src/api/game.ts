@@ -12,6 +12,7 @@ import type {
   AttributeAllocation,
   ActiveSessionResult,
   BackpackStatus,
+  KnownAsset,
 } from '@/types/game'
 
 const http = axios.create({
@@ -149,6 +150,11 @@ export async function unequipItem(sessionId: string, itemId: number) {
 
 export async function dropItem(sessionId: string, itemId: number, quantity = 1) {
   const res = await http.post('/api/inventory/dropItem', { sessionId, itemId, quantity })
+  return res.data
+}
+
+export async function getKnownAssets(sessionId: string): Promise<KnownAsset[]> {
+  const res = await http.get<KnownAsset[]>('/api/knownAsset/listKnownAssets', { params: { sessionId } })
   return res.data
 }
 

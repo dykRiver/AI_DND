@@ -46,7 +46,7 @@ public class JudgmentService : IDynamicApiController, ITransient
     /// <summary>
     /// 技能检定（内部调用）
     /// </summary>
-    internal async Task<GameDiceRollRecord> SkillCheckAsync(long sessionId, string skillName, int dc, bool hasAdvantage = false, bool hasDisadvantage = false, int difficultyModifier = 0)
+    internal async Task<GameDiceRollRecord> SkillCheckAsync(long sessionId, string skillName, int dc, bool hasAdvantage = false, bool hasDisadvantage = false, int difficultyModifier = 0, bool dryRun = false)
     {
         var character = await _characterRep.GetFirstAsync(c => c.SessionId == sessionId);
         if (character == null)
@@ -130,10 +130,13 @@ public class JudgmentService : IDynamicApiController, ITransient
             IsNatural1 = diceResult.IsNatural1
         };
 
-        await _diceRecordRep.AsInsertable(record).ExecuteCommandAsync();
+        if (!dryRun)
+        {
+            await _diceRecordRep.AsInsertable(record).ExecuteCommandAsync();
 
-        // 战斗判定后扣除已装备武器和防具各1次使用次数
-        await _inventoryService.DeductEquipmentUsesAsync(character.Id);
+            // 战斗判定后扣除已装备武器和防具各1次使用次数
+            await _inventoryService.DeductEquipmentUsesAsync(character.Id);
+        }
 
         // 输出完整判定链日志
         var resultTag = record.IsNatural20 ? "★大成功★"

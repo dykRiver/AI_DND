@@ -1,0 +1,176 @@
+{
+  "summary": {
+    "projectName": "AI_DND",
+    "locale": "zh-CN",
+    "modelId": "agent-work-loop-v4",
+    "reportContractVersion": 24,
+    "overview": "项目拥有扎实的架构设计文档和清晰的模块划分，但在自动化验证、CI/CD流水线、代理入口引导以及交付安全方面存在显著缺口，导致从代码变更到可靠交付的闭环尚未形成。",
+    "aiAgentPractice": {
+      "inspectedSurfaces": [
+        "Rules",
+        "Skills",
+        "Hooks"
+      ],
+      "coverageRows": [
+        {
+          "surface": "Rules",
+          "scopes": [
+            "Global"
+          ],
+          "count": 0,
+          "paths": []
+        },
+        {
+          "surface": "Skills",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0,
+          "paths": []
+        },
+        {
+          "surface": "Hooks",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0,
+          "paths": []
+        }
+      ]
+    },
+    "suggestions": [
+      {
+        "id": "add-agents-entrypoint",
+        "kind": "working-pattern",
+        "title": "添加 AGENTS.md 作为代理统一入口，路由至现有架构文档",
+        "reason": "项目已有完善的 doc/architecture/ 文档体系，但缺少面向编码代理的路由入口。一个简短的 AGENTS.md 可以将代理引导到正确的上下文，减少全仓遍历。",
+        "confidence": "High",
+        "owner": "项目维护者",
+        "nextStep": "创建一份 80-150 行的 AGENTS.md，包含项目定位、目录路由、命令指针、高风险区域和深层文档链接。",
+        "validation": "确认代理在接到任务时可以从 AGENTS.md 直接路由到正确的架构文档和验证路径。"
+      },
+      {
+        "id": "add-automated-validation",
+        "kind": "horizon",
+        "title": "建立分层验证体系：lint + 单元测试 + 集成测试",
+        "reason": "1036个源文件零测试零lint是显著的交付风险。分层验证是从变更到可靠交付的基础设施前提。",
+        "confidence": "High",
+        "owner": "项目维护者",
+        "nextStep": "优先添加后端 lint（dotnet format）和前端 ESLint 配置，为核心 AI 协调服务添加单元测试框架。",
+        "validation": "确认 lint 和基础测试能在 2 分钟内提供可操作的失败反馈。",
+        "prerequisites": [
+          "需要先确定测试框架选型（xUnit）和CI平台"
+        ]
+      }
+    ],
+    "assignmentSummaries": [],
+    "dimensions": [
+      {
+        "id": "task-understanding",
+        "label": "任务理解",
+        "score": 52,
+        "summary": "架构设计文档体系完善（doc/architecture/ 含10份版本化契约文档），但缺少面向编码代理的统一入口文件（如 AGENTS.md），代理需遍历整个仓库才能推断上下文路由。",
+        "findingRefs": [
+          "no-agent-entrypoint"
+        ]
+      },
+      {
+        "id": "controlled-execution",
+        "label": "可控执行",
+        "score": 45,
+        "summary": "前端有 package.json 脚本（dev/build/preview），后端有 .sln 解决方案，但缺少运行时版本固定（global.json/.nvmrc）、环境模板（.env.example）、统一命令面板和 setup/doctor 流程。",
+        "findingRefs": [
+          "no-environment-reproducibility"
+        ]
+      },
+      {
+        "id": "change-validation",
+        "label": "改动验证",
+        "score": 32,
+        "summary": "整个项目（1036个源文件）零测试文件、零lint配置、零CI流水线。唯一可用的快速反馈是 vue-tsc 类型检查，后端无编译级验证之外的任何自动化校验。",
+        "findingRefs": [
+          "no-automated-validation"
+        ]
+      },
+      {
+        "id": "reliable-delivery",
+        "label": "可靠交付",
+        "score": 30,
+        "summary": "无CI/CD配置、无PR模板、无分支保护规则、无部署脚本或回滚流程。代码变更从工作区到生产环境的验收路径完全缺失。",
+        "findingRefs": [
+          "no-delivery-pipeline"
+        ]
+      },
+      {
+        "id": "learning-capture",
+        "label": "经验沉淀",
+        "score": 35,
+        "summary": "无项目级 Skill、Hook 或可复用工作流。会话证据不可用（0个符合条件的会话），无法观察重复模式或改进闭环。",
+        "findingRefs": []
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "no-automated-validation",
+      "title": "项目缺少任何自动化验证（零测试、零lint、零CI）",
+      "severity": "High",
+      "reason": "1036个源文件（610 C# + 424 TypeScript）没有任何测试文件、lint配置或CI流水线。代码变更的正确性完全依赖人工审查，代理无法获得快速反馈来验证修改是否引入回归。对于一个包含复杂AI编排逻辑（4角色协同、骰子判定、状态管理）的系统，这是最显著的交付风险。",
+      "expectedOutput": [
+        "dotnet format 和 ESLint 配置可用",
+        "至少一个核心服务的单元测试可运行",
+        "CI 流水线在代码推送时自动执行 lint + build + test"
+      ],
+      "expectedArtifact": "CI配置 + 测试框架",
+      "aiFixPrompt": "/better-loop fix this issue\n\n为项目建立最小可用的分层验证体系：\n\n1. 后端：添加 dotnet format 检查 + xUnit 测试框架，为 AiCoordinatorService 的核心编排方法编写首个单元测试\n2. 前端：添加 ESLint 配置 + vue-tsc 集成到 CI\n3. 创建基础 CI 流水线（GitHub Actions 或等效）执行 lint + build + test\n\n## Validation\n\n- 确认 lint 命令可在 30 秒内完成并输出可操作的失败信息\n- 确认至少一个后端测试可以运行并通过\n- 确认 CI 流水线在 push 时自动触发",
+      "dimensionRefs": [
+        "change-validation"
+      ]
+    },
+    {
+      "id": "no-agent-entrypoint",
+      "title": "缺少面向编码代理的统一入口文件",
+      "severity": "Medium",
+      "reason": "项目拥有10份版本化的架构设计文档（doc/architecture/），覆盖AI系统、角色机制、副本系统、战斗判定等全部子系统，但没有 AGENTS.md、CLAUDE.md 或任何面向编码代理的路由入口。代理必须遍历整个仓库结构才能推断应该阅读哪些文档、运行哪些命令、避免哪些高风险区域。这使得每次新任务的上下文建立成本较高。",
+      "expectedOutput": [
+        "一份简短的路由入口文件，代理可从中直接定位到正确的上下文和验证路径"
+      ],
+      "expectedArtifact": "AGENTS.md",
+      "aiFixPrompt": "/better-loop fix this issue\n\n创建一份 AGENTS.md（80-150行），包含：\n1. 项目定位和技术栈概述\n2. 目录路由（server/client/doc 各模块职责）\n3. 开发命令指针（前端dev、后端启动、数据库连接）\n4. 高风险区域标记（AI编排、SignalR通信、骰子判定逻辑）\n5. 架构文档链接和加载时机说明\n\n## Validation\n\n- 确认 AGENTS.md 可以独立作为代理的任务起点\n- 确认其中引用的文档路径和命令均有效",
+      "dimensionRefs": [
+        "task-understanding"
+      ]
+    },
+    {
+      "id": "no-delivery-pipeline",
+      "title": "缺少从代码变更到生产交付的验收路径",
+      "severity": "High",
+      "reason": "项目没有CI/CD配置（.github/workflows/ 为空目录）、无PR模板、无分支保护规则、无部署脚本或回滚流程。代码变更从工作区到生产环境的路径完全依赖手动操作，没有机械化的验收关卡。对于包含AI服务调用、实时通信和复杂状态管理的系统，缺少自动化交付管道意味着每次部署都面临不可控的回归风险。",
+      "expectedOutput": [
+        "GitHub Actions 配置文件可用",
+        "分支保护规则生效",
+        "基础部署和回滚流程文档化"
+      ],
+      "expectedArtifact": "CI流水线 + 分支策略",
+      "aiFixPrompt": "/better-loop fix this issue\n\n建立最小交付管道：\n1. 添加 GitHub Actions CI 流水线（build + 基础验证）\n2. 配置分支保护规则，要求 PR 通过 CI 检查\n3. 添加 PR 模板，包含变更类型、影响范围、验证步骤\n4. 记录基础部署流程和回滚步骤\n\n## Validation\n\n- 确认 CI 在 PR 创建时自动触发\n- 确认未通过检查的 PR 无法合并\n- 确认部署文档覆盖了核心服务（后端+前端+数据库）的启动和回滚",
+      "dimensionRefs": [
+        "reliable-delivery"
+      ]
+    },
+    {
+      "id": "no-environment-reproducibility",
+      "title": "环境搭建依赖隐式知识，缺少可复现的启动流程",
+      "severity": "Medium",
+      "reason": "项目没有 global.json（.NET版本未固定）、没有 .nvmrc（Node版本未固定）、没有 .env.example（环境变量模板）、没有统一的 setup 命令或 doctor 诊断流程。前端 package.json 有基础脚本，后端有 .sln，但新环境搭建仍需依赖口口相传的隐式知识（数据库连接字符串、AI服务API Key、SignalR端口配置等）。这使得代理无法自主完成从零到可运行的环境建立。",
+      "expectedOutput": [
+        "global.json 和 .env.example 文件存在且内容完整",
+        "一条 setup 命令可完成从干净环境到可运行状态的转换"
+      ],
+      "expectedArtifact": "环境配置文件 + setup脚本",
+      "aiFixPrompt": "/better-loop fix this issue\n\n1. 添加 global.json 固定 .NET SDK 版本\n2. 添加 .env.example 列出所有必需的环境变量（数据库连接、AI API Key、端口等）\n3. 添加统一的 setup 脚本或 Makefile，覆盖依赖安装、环境检查、首次启动\n\n## Validation\n\n- 确认 global.json 中的 SDK 版本与项目实际使用版本一致\n- 确认 .env.example 覆盖了所有必需的配置项\n- 确认 setup 命令可从干净状态到达可运行状态",
+      "dimensionRefs": [
+        "controlled-execution"
+      ]
+    }
+  ]
+}

@@ -8,10 +8,16 @@ namespace DHY.Game.Core.Entities;
 public class GameBaseSkill : EntityBase
 {
     /// <summary>
-    /// 角色ID
+    /// 角色ID (可null表示Meta层永久记录)
     /// </summary>
-    [SugarColumn(ColumnDescription = "角色ID", DefaultValue = "0")]
-    public long CharacterId { get; set; }
+    [SugarColumn(ColumnDescription = "角色ID", IsNullable = true, DefaultValue = "0")]
+    public long? CharacterId { get; set; }
+
+    /// <summary>
+    /// Meta档案ID (可null表示副本内快照记录)
+    /// </summary>
+    [SugarColumn(ColumnDescription = "Meta档案ID", IsNullable = true)]
+    public long? MetaId { get; set; }
 
     /// <summary>
     /// 技能名称

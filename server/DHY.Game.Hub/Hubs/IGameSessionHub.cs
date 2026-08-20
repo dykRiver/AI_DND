@@ -43,6 +43,12 @@ public interface IGameSessionHub
     /// <summary>背包更新推送（获得道具/装备变更/使用次数变化）</summary>
     Task UpdateInventory(InventoryUpdateDto inventory);
 
+    /// <summary>已知情报/无形资产更新推送（道具AI对账登记/失效情报时推送）</summary>
+    Task UpdateKnownAssets(KnownAssetsUpdateDto assets);
+
     /// <summary>支线任务状态更新（导演AI标记任务完成时推送）</summary>
     Task UpdateSideQuests(SideQuestUpdateDto update);
+
+    /// <summary>建议行动选项推送（导演AI输出，供玩家快速选择）</summary>
+    Task ReceiveSuggestedActions(SuggestedActionsDto actions);
 }

@@ -261,3 +261,31 @@ export interface InventoryUpdate {
   equippedWeaponId?: number
   equippedArmorId?: number
 }
+
+// ========== 已知情报/无形资产 ==========
+export interface KnownAsset {
+  id: number
+  assetType: string
+  name: string
+  content?: string
+  source?: string
+  acquiredRound: number
+}
+
+// ========== 已知情报更新推送 ==========
+export interface KnownAssetsUpdate {
+  assets: KnownAsset[]
+}
+
+// ========== 建议行动选项（预计算快速选择） ==========
+export interface SuggestedAction {
+  index: number
+  actionText: string
+  hint: string
+  isFeasible?: boolean
+}
+
+export interface SuggestedActionsData {
+  options: SuggestedAction[]
+  isComputing: boolean
+}

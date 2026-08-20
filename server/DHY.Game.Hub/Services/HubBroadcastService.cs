@@ -147,6 +147,86 @@ public class HubBroadcastService : ITransient
     }
 
     /// <summary>
+    /// 章节档命中缓存的混合推送：先回放已预取的前缀正文（保留段落），再从 resumeBeatIndex 起实时流式续写剩余分镜。
+    /// 玩家点选后秒见首段（前缀），其余分镜在阅读期间边读边生成，掩盖生成延迟。
+    /// </summary>
+    /// <returns>完整叙事文本（前缀 + 续写，用于后续日志记录）</returns>
+    public async Task<string> StreamChapterResumeAsync(
+        long userId,
+        NarrativeAiService narrativeAi,
+        NarrativeInput narrativeInput,
+        string prefixText,
+        int resumeBeatIndex,
+        string chunkType = "narrative")
+    {
+        var connectionId = _sessionManager.GetConnectionId(userId);
+        if (connectionId == null) return prefixText;
+
+        var client = _hubContext.Clients.Client(connectionId);
+        var fullText = new System.Text.StringBuilder();
+
+        try
+        {
+            // 1. 回放已预取的前缀（按句分块、保留段落，模拟流式）
+            foreach (var chunk in SplitNarrativeToChunks(prefixText))
+            {
+                fullText.Append(chunk);
+                await client.ReceiveNarrative(new NarrativeChunkDto
+                {
+                    Text = chunk,
+                    ChunkType = chunkType,
+                    IsLast = false,
+                    Timestamp = DateTime.Now
+                });
+                if (_options.StreamChunkDelayMs > 0)
+                    await Task.Delay(_options.StreamChunkDelayMs);
+            }
+
+            // 2. 从 resumeBeatIndex 起实时续写（首个 chunk 为分隔空行，与前缀无缝衔接）
+            await foreach (var chunk in narrativeAi.StreamChapterContinuationAsync(narrativeInput, resumeBeatIndex, prefixText))
+            {
+                if (string.IsNullOrEmpty(chunk))
+                    continue;
+
+                fullText.Append(chunk);
+                await client.ReceiveNarrative(new NarrativeChunkDto
+                {
+                    Text = chunk,
+                    ChunkType = chunkType,
+                    IsLast = false,
+                    Timestamp = DateTime.Now
+                });
+            }
+
+            // 3. 发送最后一块标记
+            await client.ReceiveNarrative(new NarrativeChunkDto
+            {
+                Text = "",
+                ChunkType = chunkType,
+                IsLast = true,
+                Timestamp = DateTime.Now
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "章节档续写流式推送异常");
+            try
+            {
+                await client.ReceiveNarrative(new NarrativeChunkDto
+                {
+                    Text = "",
+                    ChunkType = chunkType,
+                    IsLast = true,
+                    Timestamp = DateTime.Now
+                });
+            }
+            catch { /* 推送IsLast失败则忽略 */ }
+        }
+
+        return fullText.ToString();
+    }
+
+    /// <summary>
     /// 推送骰子判定结果
     /// </summary>
     public async Task SendDiceResultAsync(long userId, DiceResultDto result)
@@ -234,6 +314,17 @@ public class HubBroadcastService : ITransient
     }
 
     /// <summary>
+    /// 推送建议行动选项
+    /// </summary>
+    public async Task SendSuggestedActionsAsync(long userId, SuggestedActionsDto actions)
+    {
+        var connectionId = _sessionManager.GetConnectionId(userId);
+        if (connectionId == null) return;
+
+        await _hubContext.Clients.Client(connectionId).ReceiveSuggestedActions(actions);
+    }
+
+    /// <summary>
     /// 推送高风险行动确认请求
     /// </summary>
     public async Task RequestDangerousActionConfirmAsync(long userId, DangerousActionDto action)
@@ -248,18 +339,19 @@ public class HubBroadcastService : ITransient
 
     /// <summary>
     /// 按中文标点拆分叙事文本为多块
-    /// 拆分规则：。！？；…… 以及换行符
+    /// 拆分规则：。！？；…… 等句末标点。
+    /// 保留段落分隔（\n\n）：仅去除水平空白，不删除换行，避免章节档缓存回放时段落塌成一堵墙。
     /// </summary>
     private static List<string> SplitNarrativeToChunks(string narrative)
     {
         if (string.IsNullOrWhiteSpace(narrative))
             return new List<string> { "" };
 
-        // 按中文/英文标点拆分，保留标点在前一块
-        var pattern = @"(?<=[。！？；…\.\!\?\n])";
+        // 仅按句末标点拆分（不再把 \n 作为拆分点），保留标点在前一块；
+        // 段落分隔的 \n\n 会作为下一块的前导换行保留，拼接后恢复原排版。
+        var pattern = @"(?<=[。！？；…\.\!\?])";
         var parts = Regex.Split(narrative, pattern)
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .Select(s => s.Trim())
+            .Select(s => s.Trim(' ', '\t'))   // 仅去除空格/制表符，保留换行
             .Where(s => s.Length > 0)
             .ToList();
 

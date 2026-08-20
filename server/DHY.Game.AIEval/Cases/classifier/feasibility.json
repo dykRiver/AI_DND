@@ -1,0 +1,82 @@
+[
+  {
+    "id": "cls_fea_normal_01",
+    "desc": "基础可行行动：搜索办公桌（常规/检定边界模糊，只测可行性）",
+    "scenario": "夜晚，码头三号仓库值班室。桌上堆着货运单据，抽屉没上锁。窗外雨声很大。守卫在仓库外围巡逻， unaware 室内情况。",
+    "inventory": "（无道具）",
+    "npc_profiles": "（无NPC在场）",
+    "player_input": "我翻一翻办公桌的抽屉，看看有没有仓库钥匙",
+    "expect": {
+      "feasibility": "feasible"
+    }
+  },
+  {
+    "id": "cls_fea_infeasible_01",
+    "desc": "凭空虚构拦截：无依据掏出高爆炸药（历史缺陷模式：门卫漏放）",
+    "scenario": "夜晚，码头三号仓库值班室。桌上堆着货运单据。窗外雨声很大。",
+    "inventory": "（无道具）",
+    "npc_profiles": "（无NPC在场）",
+    "player_input": "我从口袋里掏出C4炸药，把仓库大门炸开",
+    "expect": {
+      "feasibility": "infeasible"
+    }
+  },
+  {
+    "id": "cls_fea_uncertain_01",
+    "desc": "存疑放行：引用疑似曾获得但账本查无的关键凭证（应交导演终审，不得直接拒绝）",
+    "scenario": "夜晚，醉金楼VIP包厢。蛇哥坐在对面抽烟，试探性地打量你。",
+    "inventory": "（无道具）",
+    "npc_profiles": "蛇哥：码头走私团伙头目，45岁，态度试探，警觉但未敌对。",
+    "player_input": "我把上次从他那里拿到的那张提货单拍在桌上",
+    "expect": {
+      "feasibility": "uncertain"
+    }
+  },
+  {
+    "id": "cls_fea_common_01",
+    "desc": "普通环境资源引用放行：利用场景内明确存在的物品做无害行动（门卫不得过度拦截）",
+    "scenario": "夜晚，码头值班室外。雨刚停，地上湿漉漉的。值班室里亮着灯，窗边桌上放着烟灰缸和一个打火机。",
+    "inventory": "（无道具）",
+    "npc_profiles": "（无NPC在场）",
+    "player_input": "我拿起桌上的打火机，点根烟提提神",
+    "expect": {
+      "feasibility": "feasible"
+    }
+  },
+  {
+    "id": "cls_fea_ledger_01",
+    "desc": "账本引用放行：背包中明确有的道具",
+    "scenario": "夜晚，码头三号仓库侧门。门锁是老式挂锁，锈迹斑斑。",
+    "inventory": "撬锁工具 x1（关键道具，重量1）",
+    "npc_profiles": "（无NPC在场）",
+    "player_input": "我用撬锁工具撬开侧门的挂锁",
+    "expect": {
+      "feasibility": "feasible",
+      "judgment_needed": true,
+      "dc_range": [8, 18],
+      "skill_hint": "巧手"
+    }
+  },
+  {
+    "id": "cls_fea_infeasible_02",
+    "desc": "凭空能力拦截：低超自然世界观下无依据的魔法（世界观红线）",
+    "scenario": "夜晚，码头三号仓库值班室。桌上堆着货运单据。",
+    "inventory": "（无道具）",
+    "npc_profiles": "（无NPC在场）",
+    "player_input": "我施展火球术，把整间仓库点着",
+    "expect": {
+      "feasibility": "infeasible"
+    }
+  },
+  {
+    "id": "cls_fea_impossible_01",
+    "desc": "物理不可能拦截：肉身撞穿钢制卷帘门",
+    "scenario": "夜晚，码头三号仓库正门。钢制卷帘门紧闭，需要钥匙或撬锁才能打开。",
+    "inventory": "（无道具）",
+    "npc_profiles": "（无NPC在场）",
+    "player_input": "我用身体直接撞穿卷帘门冲进仓库",
+    "expect": {
+      "feasibility": "infeasible"
+    }
+  }
+]

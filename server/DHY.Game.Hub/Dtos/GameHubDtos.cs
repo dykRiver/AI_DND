@@ -292,6 +292,63 @@ public class InventoryItemDto
     public int Quantity { get; set; }
 }
 
+/// <summary>
+/// 已知情报/无形资产更新推送（道具AI对账后）
+/// </summary>
+public class KnownAssetsUpdateDto
+{
+    /// <summary>当前会话的全部有效已知情报</summary>
+    public List<KnownAssetDto> Assets { get; set; } = new();
+}
+
+/// <summary>
+/// 已知情报条目（前端“已知线索”展示用）
+/// </summary>
+public class KnownAssetDto
+{
+    public long Id { get; set; }
+    /// <summary>资产类型 (情报/线索/联系方式/记忆/暗号)</summary>
+    public string AssetType { get; set; } = "情报";
+    /// <summary>名称/标识</summary>
+    public string Name { get; set; } = "";
+    /// <summary>具体内容</summary>
+    public string? Content { get; set; }
+    /// <summary>获得来源</summary>
+    public string? Source { get; set; }
+    /// <summary>获得轮次</summary>
+    public int AcquiredRound { get; set; }
+}
+
+/// <summary>
+/// 建议行动选项推送（导演AI输出，供玩家快速选择）
+/// </summary>
+public class SuggestedActionsDto
+{
+    /// <summary>选项列表（恰好2个）</summary>
+    public List<SuggestedActionOptionDto> Options { get; set; } = new();
+
+    /// <summary>预计算是否进行中（true时前端显示加载指示器）</summary>
+    public bool IsComputing { get; set; }
+}
+
+/// <summary>
+/// 单个建议行动选项
+/// </summary>
+public class SuggestedActionOptionDto
+{
+    /// <summary>选项索引（0或1）</summary>
+    public int Index { get; set; }
+
+    /// <summary>行动文本（玩家可执行的行动描述）</summary>
+    public string ActionText { get; set; } = "";
+
+    /// <summary>方向提示（如"社交互动"、"潜行探索"）</summary>
+    public string Hint { get; set; } = "";
+
+    /// <summary>该选项是否可行（false 时前端置灰不可点击，避免点击后报拒绝）</summary>
+    public bool IsFeasible { get; set; } = true;
+}
+
 #endregion
 
 #region 副本就绪推送
@@ -317,6 +374,24 @@ public class DungeonReadyDto
 #endregion
 
 #region 客户端→服务端 输入DTO
+
+/// <summary>
+/// 选择缓存行动选项输入
+/// </summary>
+public class SelectCachedActionInput
+{
+    /// <summary>会话ID</summary>
+    public long SessionId { get; set; }
+
+    /// <summary>选择的选项索引（0或1）</summary>
+    public int OptionIndex { get; set; }
+
+    /// <summary>选项行动文本（缓存未命中/过期时作为玩家输入走常规流程）</summary>
+    public string ActionText { get; set; } = "";
+
+    /// <summary>成人模式开关（缓存未命中回退时使用）</summary>
+    public bool IsAdultMode { get; set; }
+}
 
 /// <summary>
 /// 玩家行动输入

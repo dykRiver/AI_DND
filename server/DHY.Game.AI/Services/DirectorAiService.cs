@@ -215,10 +215,12 @@ public class DirectorAiService : ITransient
 
             if (_modelFactory.IsDebugEnabled && directorOutput != null)
             {
-                AiDebugLogger.LogCallChain("Director", $"叙事方向: {directorOutput.NarrativeDirection}");
+                AiDebugLogger.LogCallChain("Director", $"叙事种子: {(directorOutput.NarrativeSeed?.Length > 80 ? directorOutput.NarrativeSeed[..80] + "..." : directorOutput.NarrativeSeed)}");
                 AiDebugLogger.LogCallChain("Director", $"NPC行动数: {directorOutput.NpcActions?.Count ?? 0}");
                 if (directorOutput.Pacing != null)
                     AiDebugLogger.LogCallChain("Director", $"节奏: 紧张度={directorOutput.Pacing.TensionLevel}, 备注={directorOutput.Pacing.Note}");
+                if (!string.IsNullOrEmpty(directorOutput.ProseGuidance))
+                    AiDebugLogger.LogCallChain("Director", $"文风指导: {directorOutput.ProseGuidance}");
             }
 
             return directorOutput;
@@ -239,7 +241,13 @@ public class DirectorAiService : ITransient
         try
         {
             var cleaned = CleanJsonContent(content);
-            return JsonConvert.DeserializeObject<DirectorOutput>(cleaned, _jsonSettings);
+            var output = JsonConvert.DeserializeObject<DirectorOutput>(cleaned, _jsonSettings);
+            if (output != null && string.IsNullOrEmpty(output.NarrativeSeed))
+            {
+                _logger.LogWarning("导演输出解析成功但NarrativeSeed为空，疑似JSON字段不匹配。原始内容前200字: {Content}",
+                    content.Length > 200 ? content[..200] : content);
+            }
+            return output;
         }
         catch (Exception ex)
         {

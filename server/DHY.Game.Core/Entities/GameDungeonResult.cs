@@ -95,4 +95,10 @@ public class GameDungeonResult : EntityBase
     /// </summary>
     [SugarColumn(ColumnDescription = "精简评语", Length = 512)]
     public string? SettlementComment { get; set; }
+
+    /// <summary>
+    /// 奖励是否已应用到Meta层 (幂等标志, 0=未应用, 1=已应用)
+    /// </summary>
+    [SugarColumn(ColumnDescription = "奖励是否已应用", DefaultValue = "0")]
+    public bool IsRewardApplied { get; set; }
 }

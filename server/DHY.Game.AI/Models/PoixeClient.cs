@@ -247,6 +247,11 @@ public class PoixeClient : IAiModelClient
             body["enable_thinking"] = true;
         }
 
+        if (config.MaxTokens > 0)
+        {
+            body["max_tokens"] = config.MaxTokens;
+        }
+
         return body;
     }
 

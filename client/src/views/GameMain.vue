@@ -10,6 +10,7 @@ import StatusPanel from '@/components/StatusPanel.vue'
 import LoadingOverlay from '@/components/LoadingOverlay.vue'
 import WorldInfoPanel from '@/components/WorldInfoPanel.vue'
 import BackpackPanel from '@/components/BackpackPanel.vue'
+import SuggestedActions from '@/components/SuggestedActions.vue'
 
 const router = useRouter()
 const gameStore = useGameStore()
@@ -143,6 +144,9 @@ async function handleRestartConfirm() {
         </div>
       </div>
     </div>
+
+    <!-- ★ 建议行动选项（预计算快速选择） -->
+    <SuggestedActions />
 
     <!-- 玩家输入区 -->
     <PlayerInput

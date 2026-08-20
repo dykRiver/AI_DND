@@ -1,0 +1,182 @@
+[
+  {
+    "id": "dir_success_normal_01",
+    "desc": "撬锁成功：需状态变更，种子应写成功走向（撬锁是状态变更非资产变更，不要求item_hints）",
+    "input": {
+      "player_action": "我用撬锁工具撬开三号仓库侧门的挂锁",
+      "action_intent": "潜行·撬锁：打开仓库侧门",
+      "world_state": "夜晚，码头三号仓库侧门。老式挂锁锈迹斑斑。四周无人，雨声掩盖动静。",
+      "dungeon_context": "1997年港城码头走私线。三号仓库藏匿走私货，玩家是警方卧底，目标是找到货运证据。",
+      "npc_profiles": "（无NPC在场）",
+      "main_quest_progress": "主线：搜集蛇哥团伙的走私证据。当前进度：已潜入码头货区，尚未进入仓库。",
+      "player_inventory": "撬锁工具 x1（关键道具，重量1）",
+      "is_routine": false,
+      "character_name": "陈默",
+      "judgment_outcome": "技能：巧手，DC 13，掷骰结果：17，判定成功",
+      "needs_state_change": true,
+      "side_quest_list": "（无）",
+      "hidden_content_list": "仓库深处藏着一本真实账本"
+    },
+    "expect": {
+      "judgment_success": true
+    }
+  },
+  {
+    "id": "dir_dialogue_micro_01",
+    "desc": "与蛇哥闲聊：应输出对话指导，普通物品（香烟）不得hint",
+    "input": {
+      "player_action": "我跟蛇哥碰了下杯，随口问他最近码头生意忙不忙",
+      "action_intent": "社交·交谈：打探生意状况",
+      "world_state": "夜晚，醉金楼大厅。灯红酒绿，乐队在台上演奏。蛇哥态度友善，正在喝酒。",
+      "dungeon_context": "1997年港城。醉金楼是蛇哥团伙的据点之一。玩家是警方卧底，伪装成想入伙的江湖人。",
+      "npc_profiles": "蛇哥：码头走私团伙头目，45岁，多疑但当前态度友善放松，喜欢被恭维。",
+      "main_quest_progress": "主线：取得蛇哥信任，搜集走私证据。当前进度：刚与蛇哥搭上话。",
+      "player_inventory": "（无道具）",
+      "is_routine": true,
+      "character_name": "陈默",
+      "judgment_outcome": null,
+      "needs_state_change": false,
+      "side_quest_list": "（无）",
+      "hidden_content_list": "蛇哥的真名和账本下落是隐藏信息"
+    },
+    "expect": {
+      "expect_dialogue": true,
+      "forbid_hint_names": ["香烟", "酒杯", "钥匙"]
+    }
+  },
+  {
+    "id": "dir_fail_normal_01",
+    "desc": "搜索失败：种子必须写失败走向（不得写成搜到了东西）",
+    "input": {
+      "player_action": "我翻查值班室的铁皮柜，想找仓库钥匙",
+      "action_intent": "调查·搜索：寻找仓库钥匙",
+      "world_state": "夜晚，码头三号仓库值班室。铁皮柜立在墙角，桌上堆着货运单据。窗外雨声很大。",
+      "dungeon_context": "1997年港城码头。玩家是警方卧底，想进入三号仓库搜集走私证据。",
+      "npc_profiles": "（无NPC在场）",
+      "main_quest_progress": "主线：搜集走私证据。当前进度：已进入值班室，仓库正门仍锁着。",
+      "player_inventory": "（无道具）",
+      "is_routine": false,
+      "character_name": "陈默",
+      "judgment_outcome": "技能：调查，DC 12，掷骰结果：4，判定失败",
+      "needs_state_change": false,
+      "side_quest_list": "（无）",
+      "hidden_content_list": "（无）"
+    },
+    "expect": {
+      "judgment_success": false
+    }
+  },
+  {
+    "id": "dir_chapter_01",
+    "desc": "天台摊牌：重大剧情转折应为chapter档并输出分镜表",
+    "input": {
+      "player_action": "我把警官证拍在天台栏杆上，告诉蛇哥我是警察，让他投降",
+      "action_intent": "社交·摊牌：表明身份抓捕蛇哥",
+      "world_state": "深夜，醉金楼天台。城市灯火在脚下铺开，风很大。蛇哥被约到这里，只带了一个马仔。",
+      "dungeon_context": "1997年港城。玩家卧底多时，已掌握走私证据，今晚决定收网摊牌。",
+      "npc_profiles": "蛇哥：走私团伙头目，多疑狠辣，不知道玩家是警察。马仔阿强：蛇哥心腹，腰间别着刀。",
+      "main_quest_progress": "主线：收网行动。当前进度：证据已齐，摊牌时刻。",
+      "player_inventory": "警官证 x1（关键道具，重量0.1）；配枪 x1（武器，重量1）",
+      "is_routine": false,
+      "character_name": "陈默",
+      "judgment_outcome": "技能：威吓，DC 16，掷骰结果：19，判定成功",
+      "needs_state_change": true,
+      "side_quest_list": "（无）",
+      "hidden_content_list": "蛇哥暗中安排了后手：楼下还有一组接应人马"
+    },
+    "expect": {
+      "expect_beat_scale": "chapter",
+      "judgment_success": true
+    }
+  },
+  {
+    "id": "dir_routine_01",
+    "desc": "常规观察：is_routine=true，不应凭空hint道具",
+    "input": {
+      "player_action": "我蹲在集装箱后面，看看值班室里的情况",
+      "action_intent": "观察·侦察：查看值班室",
+      "world_state": "夜晚，码头三号仓库外围。集装箱堆成小山，值班室亮着灯，有个守卫在门口抽烟。",
+      "dungeon_context": "1997年港城码头。玩家是警方卧底，正在踩点。",
+      "npc_profiles": "守卫：普通马仔，正在抽烟走神。",
+      "main_quest_progress": "主线：搜集走私证据。当前进度：踩点阶段。",
+      "player_inventory": "（无道具）",
+      "is_routine": true,
+      "character_name": "陈默",
+      "judgment_outcome": null,
+      "needs_state_change": false,
+      "side_quest_list": "（无）",
+      "hidden_content_list": "（无）"
+    },
+    "expect": {
+      "forbid_hint_names": ["钥匙", "对讲机", "撬锁工具", "账本"]
+    }
+  },
+  {
+    "id": "dir_hint_key_01",
+    "desc": "抽屉拿钥匙：关键道具必须hint，场景普通物品（单据）不应hint",
+    "input": {
+      "player_action": "我拉开没上锁的抽屉，从里面拿出那串仓库钥匙",
+      "action_intent": "探索·拿取：取得仓库钥匙",
+      "world_state": "夜晚，码头三号仓库值班室。桌上堆着货运单据，抽屉没上锁，一串黄铜钥匙放在文件下面。",
+      "dungeon_context": "1997年港城码头。玩家是警方卧底，需要进入三号仓库。",
+      "npc_profiles": "（无NPC在场）",
+      "main_quest_progress": "主线：搜集走私证据。当前进度：已进入值班室。",
+      "player_inventory": "（无道具）",
+      "is_routine": false,
+      "character_name": "陈默",
+      "judgment_outcome": null,
+      "needs_state_change": true,
+      "side_quest_list": "（无）",
+      "hidden_content_list": "（无）"
+    },
+    "expect": {
+      "expect_hint_names": ["钥匙"],
+      "forbid_hint_names": ["单据", "香烟"]
+    }
+  },
+  {
+    "id": "dir_seed_fail_01",
+    "desc": "纵火失手：点燃火柴惊动守卫（失败走向），状态变更摘要必出",
+    "input": {
+      "player_action": "我划着火柴想点燃货运单据",
+      "action_intent": "破坏·纵火：烧毁货运单据",
+      "world_state": "夜晚，码头三号仓库值班室。桌上堆着货运单据。门外传来脚步声，守卫正在走近。",
+      "dungeon_context": "1997年港城码头。玩家是警方卧底——注意：卧底身份要求不能真正销毁关键证据。",
+      "npc_profiles": "守卫：正在走近值班室，还有十步。",
+      "main_quest_progress": "主线：搜集走私证据。当前进度：已进入值班室。",
+      "player_inventory": "火柴盒 x1（普通杂物，重量0.1）",
+      "is_routine": false,
+      "character_name": "陈默",
+      "judgment_outcome": "技能：巧手，DC 12，掷骰结果：3，判定失败",
+      "needs_state_change": true,
+      "side_quest_list": "（无）",
+      "hidden_content_list": "（无）"
+    },
+    "expect": {
+      "judgment_success": false
+    }
+  },
+  {
+    "id": "dir_dialogue_conceal_01",
+    "desc": "打探货期：社交成功，对话指导的隐瞒层应存在（蛇哥不会全说）",
+    "input": {
+      "player_action": "我给蛇哥续上酒，旁敲侧击问下一批货什么时候到",
+      "action_intent": "社交·打探：套取货期情报",
+      "world_state": "夜晚，醉金楼VIP包厢。灯光昏暗，桌上摆着洋酒。蛇哥喝到半醉，话多了起来。",
+      "dungeon_context": "1997年港城。玩家是警方卧底，需要套取下一批走私货的到港时间。",
+      "npc_profiles": "蛇哥：走私团伙头目，半醉状态，话多但仍守口如瓶关于具体日期。",
+      "main_quest_progress": "主线：搜集走私证据。当前进度：已取得蛇哥初步信任。",
+      "player_inventory": "（无道具）",
+      "is_routine": false,
+      "character_name": "陈默",
+      "judgment_outcome": "技能：说服，DC 14，掷骰结果：16，判定成功",
+      "needs_state_change": false,
+      "side_quest_list": "（无）",
+      "hidden_content_list": "具体货期（周四凌晨）是蛇哥不愿明说的信息"
+    },
+    "expect": {
+      "expect_dialogue": true,
+      "judgment_success": true
+    }
+  }
+]

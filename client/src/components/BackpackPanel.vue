@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useGameStore } from '@/stores/game'
-import { getBackpack, equipItem, unequipItem, dropItem } from '@/api/game'
+import { getBackpack, equipItem, unequipItem, dropItem, getKnownAssets } from '@/api/game'
 import type { BackpackStatus, InventoryItem } from '@/types/game'
 
 const gameStore = useGameStore()
@@ -10,9 +10,22 @@ const loading = ref(false)
 
 const emit = defineEmits<{ close: [] }>()
 
+// 已知情报：优先用 SignalR 实时推送的 store 数据；面板打开时也主动拉取一次以防断线错过推送。
+const knownAssets = computed(() => gameStore.knownAssets)
+
 onMounted(async () => {
-  await refreshBackpack()
+  await Promise.all([refreshBackpack(), refreshKnownAssets()])
 })
+
+async function refreshKnownAssets() {
+  if (!gameStore.sessionId) return
+  try {
+    const data = await getKnownAssets(gameStore.sessionId)
+    gameStore.updateKnownAssets({ assets: data })
+  } catch {
+    // 情报拉取失败时静默，保留现有推送数据
+  }
+}
 
 async function refreshBackpack() {
   if (!gameStore.sessionId) return
@@ -226,6 +239,26 @@ defineExpose({ refreshBackpack })
                   class="text-xs px-2 py-1 rounded bg-rose-600/20 border border-rose-500/40 text-rose-300 hover:bg-rose-600/30"
                 >丢弃</button>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 已知线索/情报（无形资产，由物资官记账登记） -->
+        <div class="px-5 py-3 border-t border-gray-700/30 max-h-48 overflow-y-auto">
+          <p class="text-xs text-gray-500 mb-2">📜 已知线索 ({{ knownAssets.length }})</p>
+          <div v-if="!knownAssets.length" class="text-center text-gray-600 text-sm py-3">暂无已知情报</div>
+          <div v-else class="space-y-2">
+            <div
+              v-for="asset in knownAssets"
+              :key="asset.id"
+              class="bg-slate-700/30 rounded-xl px-3 py-2.5 border border-gray-700/30"
+            >
+              <div class="flex items-center gap-2">
+                <span class="text-xs px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 shrink-0">{{ asset.assetType }}</span>
+                <span class="text-sm text-gray-100 truncate">{{ asset.name }}</span>
+              </div>
+              <p v-if="asset.content" class="text-xs text-gray-400 mt-1 break-words">{{ asset.content }}</p>
+              <p v-if="asset.source" class="text-xs text-gray-600 mt-0.5">来源：{{ asset.source }}</p>
             </div>
           </div>
         </div>

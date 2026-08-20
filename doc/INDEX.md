@@ -23,14 +23,14 @@
 | 文档 | 说明 |
 |------|------|
 | [系统总览](architecture/system-overview.md) | 游戏核心循环、技术栈、模块结构 |
-| [角色与技能系统](architecture/character-system.md) | 六维属性、双层技能、HP系统、背包重量制+装备槽 |
+| [角色与技能系统](architecture/character-system.md) | 六维属性、双层技能、HP系统、背包重量制+装备槽、道具变更闭环（资产账本） |
 | [副本系统](architecture/dungeon-system.md) | 副本模板、难度DC修正、时段制、入场体验、同题异卷 |
 | [战斗与判定系统](architecture/combat-and-judgment.md) | 骰子判定、世界难度修正、装备加值、超载惩罚、战斗分级、失败处理 |
 | [评分结算与Meta成长](architecture/scoring-and-progression.md) | 9级评分、天赋树、段位晋级赛 |
-| [叙事设计规范](architecture/narrative-design.md) | 感官写作、内心声音、节奏管理、道德系统 |
+| [叙事设计规范](architecture/narrative-design.md) | 创作三原则、对话层级写作、场景文风模块、文风圣经与意象系统、**节拍分档（micro/normal/chapter）与章节档分段生成**、叙事节奏、道德系统 |
 | [NPC系统](architecture/npc-system.md) | 对话呈现、语言个性化、关系系统、档案卡 |
-| [玩家体验设计](architecture/player-experience.md) | 信息三层架构、线索笔记本、输入引导、反悔机制 |
-| [AI系统架构](architecture/ai-architecture.md) | 四AI角色、协作流程、判定信息流、**局面快照**、道具生成、DC标尺、上下文策略 |
+| [玩家体验设计](architecture/player-experience.md) | 信息三层架构、线索笔记本（已知情报账本）、输入引导、反悔机制、**快速行动选择**（预计算缓存） |
+| [AI系统架构](architecture/ai-architecture.md) | 五AI角色、**文学引擎三层架构**、**节拍分档与章节档分段生成**、协作流程、判定信息流、**局面快照**、**资产账本**（三态门卫 + 物资官依导演蓝图记账）、DC标尺、**行动选项预计算机制** |
 | [世界观架构](architecture/world-building.md) | 主基调、低超自然红线、跨副本使用 |
 
 ## 新增文档决策树

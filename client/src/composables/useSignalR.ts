@@ -14,8 +14,10 @@ import type {
   WorldInfo,
   DungeonReady,
   InventoryUpdate,
+  KnownAssetsUpdate,
   SideQuestUpdate,
   SessionEndData,
+  SuggestedActionsData,
 } from '@/types/game'
 
 // ===== 模块级单例状态（跨组件共享同一个 SignalR 连接） =====
@@ -165,9 +167,19 @@ export function useSignalR() {
       gameStore.updateBackpack(inventory)
     })
 
+    // ★ 已知情报/无形资产更新推送（物资官记账后）
+    connection.value.on('UpdateKnownAssets', (assets: KnownAssetsUpdate) => {
+      gameStore.updateKnownAssets(assets)
+    })
+
     // ★ 支线任务状态更新
     connection.value.on('UpdateSideQuests', (update: SideQuestUpdate) => {
       gameStore.updateSideQuestStatus(update)
+    })
+
+    // ★ 建议行动选项（预计算快速选择）
+    connection.value.on('ReceiveSuggestedActions', (data: SuggestedActionsData) => {
+      gameStore.setSuggestedActions(data)
     })
   }
 
@@ -209,11 +221,27 @@ export function useSignalR() {
     if (!connection.value || !isConnected.value) return
     gameStore.disableInput()
     gameStore.setLoading(true, '世界推演中...')
+    gameStore.clearSuggestedActions()
     // fire-and-forget：只发送请求，结果通过推送事件返回
     await connection.value.send('PlayerAction', {
       sessionId: Number(sessionId),
       actionText,
       isAdultMode,
+    })
+  }
+
+  async function selectCachedAction(sessionId: string, optionIndex: number, actionText: string) {
+    if (!connection.value || !isConnected.value) return
+    gameStore.disableInput()
+    gameStore.setLoading(true, '世界推演中...')
+    gameStore.clearSuggestedActions()
+    // fire-and-forget：只发送请求，结果通过推送事件返回
+    // actionText：缓存过期时服务端以此文本当作玩家输入走常规流程
+    await connection.value.send('SelectCachedAction', {
+      sessionId: Number(sessionId),
+      optionIndex,
+      actionText,
+      isAdultMode: gameStore.isAdultMode,
     })
   }
 
@@ -296,6 +324,7 @@ export function useSignalR() {
     disconnect,
     destroy,
     sendPlayerAction,
+    selectCachedAction,
     selectDungeon,
     onDungeonReady,
     confirmTimeAdvance,

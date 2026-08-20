@@ -23,11 +23,20 @@ public class GameActionResult
     /// <summary>是否为选择点</summary>
     public bool IsChoicePoint { get; set; }
 
-    /// <summary>本次获得的道具列表</summary>
-    public List<GameInventoryItem>? AcquiredItems { get; set; }
+    /// <summary>导演AI建议的行动选项（供前端显示快速选择按钮）</summary>
+    public List<SuggestedActionInfo>? SuggestedActions { get; set; }
 
-    /// <summary>本次是否有道具被消耗（用于Hub判断是否推送背包更新）</summary>
-    public bool HasConsumedItems { get; set; }
+    /// <summary>分类AI判定是否需要状态变更（缓存命中回放时用于守卫持久化）</summary>
+    public bool NeedsStateChange { get; set; }
+
+    /// <summary>导演蓝图物资清单（权威事实基准，供物资官逐条记账落库）</summary>
+    public List<ItemHintInfo>? ItemHints { get; set; }
+
+    /// <summary>分类AI提炼的行动意图（供物资官记账入参与日志）</summary>
+    public string? ActionIntent { get; set; }
+
+    /// <summary>可行性三态：feasible / uncertain / infeasible（供三态分流：infeasible 短路拒绝）</summary>
+    public string? Feasibility { get; set; }
 }
 
 /// <summary>

@@ -72,7 +72,7 @@ public class ActionClassifierService : ITransient
                 var judgmentDetail = j != null
                     ? $"Judgment(needed={j.Needed}, skill={j.Skill}, dc={j.Dc}, advantage={j.Advantage}, disadvantage={j.Disadvantage}, context={j.Context})"
                     : "Judgment=null";
-                AiDebugLogger.LogCallChain("Classifier", $"分类结果: IsRoutine={classificationResult.IsRoutine}, NeedsStateChange={classificationResult.NeedsStateChange}, IsFeasible={classificationResult.IsFeasible}, IsAdult={classificationResult.IsAdult}, ActionIntent={classificationResult.ActionIntent}, Confidence={classificationResult.Confidence}, Reason={classificationResult.Reason}, {judgmentDetail}");
+                AiDebugLogger.LogCallChain("Classifier", $"分类结果: IsRoutine={classificationResult.IsRoutine}, NeedsStateChange={classificationResult.NeedsStateChange}, Feasibility={classificationResult.Feasibility}, IsAdult={classificationResult.IsAdult}, ActionIntent={classificationResult.ActionIntent}, Confidence={classificationResult.Confidence}, Reason={classificationResult.Reason}, {judgmentDetail}");
             }
 
             return classificationResult;
@@ -105,12 +105,23 @@ public class ActionClassifierService : ITransient
                 judgment = judgmentToken.ToObject<JudgmentInfo>(JsonSerializer.Create(_jsonSettings));
             }
 
+            // 可行性三态：优先读 feasibility 字符串，回退旧版 is_feasible 布尔
+            var feasibilityStr = root["feasibility"]?.Value<string>();
+            if (string.IsNullOrWhiteSpace(feasibilityStr))
+            {
+                var legacyFeasible = root["is_feasible"]?.Value<bool>() ?? true;
+                feasibilityStr = legacyFeasible ? "feasible" : "infeasible";
+            }
+            feasibilityStr = feasibilityStr.Trim().ToLowerInvariant();
+            if (feasibilityStr is not ("feasible" or "uncertain" or "infeasible"))
+                feasibilityStr = "feasible";
+
             return new ClassificationResult
             {
                 IsRoutine = root["is_routine"]?.Value<bool>() ?? false,
                 Confidence = root["confidence"]?.Value<double>() ?? 0.5,
                 Reason = root["reason"]?.Value<string>(),
-                IsFeasible = root["is_feasible"]?.Value<bool>() ?? true,
+                Feasibility = feasibilityStr,
                 InfeasibleReason = root["infeasible_reason"]?.Value<string>(),
                 NeedsStateChange = root["needs_state_change"]?.Value<bool>() ?? false,
                 IsAdult = root["is_adult"]?.Value<bool>() ?? false,

@@ -1,0 +1,91 @@
+[
+  {
+    "id": "cls_routine_move_01",
+    "desc": "常规行动：简单移动到相邻地点（不应触发检定）",
+    "scenario": "夜晚，码头三号仓库值班室。桌上堆着货运单据，窗户半开，能听到外面的雨声。",
+    "inventory": "（无道具）",
+    "npc_profiles": "（无NPC在场）",
+    "player_input": "我走到窗边，往码头方向看看",
+    "expect": {
+      "feasibility": "feasible",
+      "is_routine": true,
+      "judgment_needed": false
+    }
+  },
+  {
+    "id": "cls_routine_observe_01",
+    "desc": "侦察式观察（常规/检定边界模糊，只测可行性；routine 测试点由 move/talk 两例承担）",
+    "scenario": "夜晚，码头三号仓库外围。集装箱堆成小山，值班室亮着灯，有个守卫在门口抽烟。",
+    "inventory": "（无道具）",
+    "npc_profiles": "守卫：普通马仔，正在抽烟走神。",
+    "player_input": "我蹲在集装箱后面，仔细看看值班室里的情况",
+    "expect": {
+      "feasibility": "feasible"
+    }
+  },
+  {
+    "id": "cls_routine_talk_01",
+    "desc": "常规行动：与友善NPC简单交谈（不应误判为社交检定）",
+    "scenario": "夜晚，醉金楼大厅。蛇哥态度友善，正在和你闲聊喝酒，气氛放松。",
+    "inventory": "（无道具）",
+    "npc_profiles": "蛇哥：码头走私团伙头目，当前态度友善放松。",
+    "player_input": "我跟蛇哥碰了下杯，随口问他最近码头生意忙不忙",
+    "expect": {
+      "feasibility": "feasible",
+      "is_routine": true,
+      "judgment_needed": false
+    }
+  },
+  {
+    "id": "cls_adult_clear_01",
+    "desc": "成人内容识别：露骨色情描写应标记 is_adult（可行性三态在此类场景下会摆动，不作断言）",
+    "scenario": "深夜，醉金楼后巷的旅馆房间。阿娟坐在床边看着你。",
+    "inventory": "（无道具）",
+    "npc_profiles": "阿娟：醉金楼的歌女，与你关系暧昧。",
+    "player_input": "我把她按倒在床上，开始脱她的衣服，和她发生性关系",
+    "expect": {
+      "is_adult": true
+    }
+  },
+  {
+    "id": "cls_adult_normal_01",
+    "desc": "成人内容不误报：搜身/接触类行动不应标记 is_adult（历史缺陷模式：误报）",
+    "scenario": "夜晚，码头仓库后巷。一个喝醉的马仔靠在墙角睡着了。",
+    "inventory": "（无道具）",
+    "npc_profiles": "醉酒马仔：失去意识，不省人事。",
+    "player_input": "我搜一下他的口袋，看看有没有仓库钥匙",
+    "expect": {
+      "feasibility": "feasible",
+      "is_adult": false
+    }
+  },
+  {
+    "id": "cls_dc_social_01",
+    "desc": "社交检定：威逼NPC，DC偏难区间，技能应为威吓/欺瞒/说服之一",
+    "scenario": "夜晚，醉金楼VIP包厢。蛇哥坐在对面抽烟，眼神警惕。桌上放着货运单据。",
+    "inventory": "打火机 x1（普通杂物，重量0.1）",
+    "npc_profiles": "蛇哥：码头走私团伙头目，45岁，多疑强硬，态度警惕。",
+    "player_input": "我打着火机凑近桌上的单据，逼蛇哥说出今晚的货期，不然就把单据点了",
+    "expect": {
+      "feasibility": "feasible",
+      "is_routine": false,
+      "judgment_needed": true,
+      "dc_range": [12, 20]
+    }
+  },
+  {
+    "id": "cls_dc_stealth_01",
+    "desc": "潜行检定：跟踪NPC，技能应为隐匿",
+    "scenario": "深夜，码头货区。一个马仔提着手电往三号仓库走，四周集装箱遮挡视线，雨刚停地面湿滑。",
+    "inventory": "（无道具）",
+    "npc_profiles": "马仔：警觉性一般，正赶往仓库。",
+    "player_input": "我悄悄跟在那个马仔后面，别让他发现",
+    "expect": {
+      "feasibility": "feasible",
+      "is_routine": false,
+      "judgment_needed": true,
+      "dc_range": [11, 18],
+      "skill_hint": "隐匿"
+    }
+  }
+]

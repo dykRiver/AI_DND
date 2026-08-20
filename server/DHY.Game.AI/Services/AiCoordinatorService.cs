@@ -27,6 +27,7 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
     private readonly NpcService _npcService;
     private readonly JudgmentService _judgmentService;
     private readonly InventoryService _inventoryService;
+    private readonly KnownAssetService _knownAssetService;
     private readonly TimeSegmentService _timeSegmentService;
     private readonly SqlSugarRepository<GameDungeonSession> _sessionRep;
     private readonly SqlSugarRepository<GameDungeonTemplate> _templateRep;
@@ -51,6 +52,7 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
         NpcService npcService,
         JudgmentService judgmentService,
         InventoryService inventoryService,
+        KnownAssetService knownAssetService,
         TimeSegmentService timeSegmentService,
         SqlSugarRepository<GameDungeonSession> sessionRep,
         SqlSugarRepository<GameDungeonTemplate> templateRep,
@@ -69,6 +71,7 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
         _npcService = npcService;
         _judgmentService = judgmentService;
         _inventoryService = inventoryService;
+        _knownAssetService = knownAssetService;
         _timeSegmentService = timeSegmentService;
         _sessionRep = sessionRep;
         _templateRep = templateRep;
@@ -117,10 +120,15 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
         // 1. 行动分类（含可行性判定 + 成人内容判定 + 技能判定）
         var classifierState = await _worldState.GetCurrentStateForClassifierAsync(sessionId);
         var playerInventory = await BuildPlayerInventoryText(sessionId);
+        var knownAssets = await BuildKnownAssetsText(sessionId);
+        // 分类AI的可行性判据 = 背包（物理道具）+ 已知情报（无形资产）构成的完整“可用资产清单”
+        var availableAssets = string.IsNullOrEmpty(knownAssets)
+            ? playerInventory
+            : $"{playerInventory}\n\n【已知情报/线索】\n{knownAssets}";
         var npcs = await _npcService.GetCriticalNpcsAsync(sessionId);
         var npcProfiles = BuildNpcProfilesText(npcs);
         var allNarrativeHistory = await _worldState.GetNarrativeHistoryAsync(new NarrativeHistoryQueryInput { SessionId = sessionId, Count = 10 });
-        var classification = await _classifier.ClassifyAsync(actionText, classifierState, playerInventory, npcProfiles);
+        var classification = await _classifier.ClassifyAsync(actionText, classifierState, availableAssets, npcProfiles);
 
         // 1.3 叙事历史过滤（成人→非成人转换时，跳过成人记录）
         var lastRecordIsAdult = allNarrativeHistory.FirstOrDefault()?.IsAdult ?? false;
@@ -151,19 +159,22 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             if (DebugEnabled)
                 AiDebugLogger.LogOrchestration("可行性短路", $"行动不可行: {rejectText}");
 
-            session.InteractionCount++;
-            await _sessionRep.AsUpdateable(session)
-                .UpdateColumns(s => new { s.InteractionCount })
-                .ExecuteCommandAsync();
-
-            await _narrativeLogRep.AsInsertable(new GameNarrativeLog
+            if (!input.DryRun)
             {
-                SessionId = sessionId,
-                InteractionIndex = session.InteractionCount,
-                PlayerInput = actionText,
-                NarrativeText = rejectText,
-                Timestamp = DateTime.Now
-            }).ExecuteCommandAsync();
+                session.InteractionCount++;
+                await _sessionRep.AsUpdateable(session)
+                    .UpdateColumns(s => new { s.InteractionCount })
+                    .ExecuteCommandAsync();
+
+                await _narrativeLogRep.AsInsertable(new GameNarrativeLog
+                {
+                    SessionId = sessionId,
+                    InteractionIndex = session.InteractionCount,
+                    PlayerInput = actionText,
+                    NarrativeText = rejectText,
+                    Timestamp = DateTime.Now
+                }).ExecuteCommandAsync();
+            }
 
             return new GameActionResult
             {
@@ -227,10 +238,11 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             diceResult = await _judgmentService.SkillCheckAsync(
                 sessionId,
                 classification.Judgment.Skill,
-                classification.Judgment.Dc,
+                classification.Judgment.Dc!.Value,
                 classification.Judgment.Advantage,
                 classification.Judgment.Disadvantage,
-                difficultyModifier);
+                difficultyModifier,
+                dryRun: input.DryRun);
 
             // 构建判定结果文本（注入导演AI上下文）
             var tag = diceResult.IsNatural20 ? "大成功" : diceResult.IsNatural1 ? "大失败" : diceResult.IsSuccess ? "成功" : "失败";
@@ -243,7 +255,7 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             // 即时回调：在导演AI推演之前推送骰子结果，让玩家在等待期间看到判定详情
             input.OnDiceRolled?.Invoke(diceResult);
         }
-        else if (classification.Judgment != null && classification.Judgment.Needed && classification.Judgment.Dc <= 0)
+        else if (classification.Judgment != null && classification.Judgment.Needed && classification.Judgment.Dc is null or <= 0)
         {
             _logger.LogWarning("分类AI输出的DC无效({Dc})，跳过本次技能检定", classification.Judgment.Dc);
         }
@@ -283,80 +295,21 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             };
         }
 
-        // 7. 处理获得的道具（AI输出acquired_items → 入库，仅NeedsStateChange时生效）
-        var acquiredItems = new List<GameInventoryItem>();
-        if (classification.NeedsStateChange && directorOutput.AcquiredItems != null && directorOutput.AcquiredItems.Count > 0)
-        {
-            if (character != null)
-            {
-                foreach (var aiItem in directorOutput.AcquiredItems)
-                {
-                    try
-                    {
-                        var item = await _inventoryService.AddItemAsync(new AddItemInput
-                        {
-                            CharacterId = character.Id,
-                            ItemName = aiItem.ItemName,
-                            ItemType = aiItem.ItemType,
-                            Description = aiItem.Description,
-                            Quantity = 1,
-                            IsKeyItem = aiItem.ItemType == "关键道具",
-                            Weight = Math.Round(aiItem.Weight, 1, MidpointRounding.AwayFromZero),
-                            AttributeBonus = aiItem.AttributeBonus,
-                            LinkedAttribute = aiItem.LinkedAttribute,
-                            MaxUses = aiItem.MaxUses,
-                            IsUnlimited = aiItem.IsUnlimited
-                        });
-                        acquiredItems.Add(item);
+        // 7. 物资清单（item_hints）：导演不再直接写背包。
+        //    实际资产变更由物资官(道具AI)在导演之后、叙事之前依此权威蓝图记账落库（见 GameSessionHub）。
+        //    此处收集蓝图条目，随结果透传给 Hub 供物资官逐条落实。
+        var itemHints = directorOutput.ItemHints ?? BuildLegacyItemHints(directorOutput);
+        if (DebugEnabled && itemHints is { Count: > 0 })
+            AiDebugLogger.LogOrchestration("物资推荐", string.Join("; ", itemHints.Select(h => $"{h.Change}·{h.Category}:{h.Name}")));
 
-                        if (DebugEnabled)
-                            AiDebugLogger.LogOrchestration("道具获取", $"{aiItem.ItemName} ({aiItem.ItemType}) 重量={aiItem.Weight} 加值={aiItem.AttributeBonus}{aiItem.LinkedAttribute}");
-                    }
-                    catch (Exception itemEx)
-                    {
-                        _logger.LogWarning("道具入库失败: {Error}, 道具={ItemName}", itemEx.Message, aiItem.ItemName);
-                    }
-                }
-            }
-        }
-
-        // 7.6 处理消耗的道具（AI输出consumed_items → 扣减背包，仅NeedsStateChange时生效）
-        var hasConsumedItems = false;
-        if (classification.NeedsStateChange && directorOutput.ConsumedItems != null && directorOutput.ConsumedItems.Count > 0)
-        {
-            if (character != null)
-            {
-                foreach (var consumed in directorOutput.ConsumedItems)
-                {
-                    try
-                    {
-                        var success = await _inventoryService.ConsumeItemByNameAsync(
-                            character.Id, consumed.ItemName, consumed.Quantity);
-
-                        if (success)
-                        {
-                            hasConsumedItems = true;
-                            if (DebugEnabled)
-                                AiDebugLogger.LogOrchestration("道具消耗", $"{consumed.ItemName} x{consumed.Quantity} - {consumed.Reason}");
-                        }
-                        else
-                        {
-                            _logger.LogWarning("道具消耗跳过：背包中未找到'{ItemName}'", consumed.ItemName);
-                        }
-                    }
-                    catch (Exception consumeEx)
-                    {
-                        _logger.LogWarning("道具扣减失败: {Error}, 道具={ItemName}", consumeEx.Message, consumed.ItemName);
-                    }
-                }
-            }
-        }
-
-        // 8. 应用世界状态变更（仅NeedsStateChange时生效）
+        // 8. 应用世界状态变更（仅NeedsStateChange时生效，DryRun时跳过）
         var stateUpdate = new GameStateUpdate();
         if (classification.NeedsStateChange && directorOutput.WorldStateChanges != null)
         {
-            await _worldState.ApplyChangesAsync(sessionId, directorOutput.WorldStateChanges, session.InteractionCount);
+            if (!input.DryRun)
+            {
+                await _worldState.ApplyChangesAsync(sessionId, directorOutput.WorldStateChanges, session.InteractionCount);
+            }
 
             // 任务进度变化时传递给Hub，供推送前端更新支线任务状态
             if (directorOutput.WorldStateChanges.QuestProgress != null)
@@ -365,32 +318,39 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             }
         }
 
-        // 8.5 时段推进（仅NeedsStateChange时生效）
+        // 8.5 时段推进（仅NeedsStateChange时生效，DryRun时跳过）
         if (classification.NeedsStateChange && directorOutput.TimeAdvance)
         {
-            try
+            if (!input.DryRun)
             {
-                await _timeSegmentService.AdvanceTimeAsync(new SessionIdInput { SessionId = sessionId });
-                stateUpdate.TimeAdvanced = true;
-
-                if (DebugEnabled)
-                    AiDebugLogger.LogOrchestration("时段推进", $"时段已推进, SessionId={sessionId}");
-
-                // 同步session对象的时段字段，保证后续代码使用最新值
-                var updatedSession = await _sessionRep.GetFirstAsync(s => s.Id == sessionId);
-                if (updatedSession != null)
+                try
                 {
-                    session.CurrentDay = updatedSession.CurrentDay;
-                    session.CurrentSegment = updatedSession.CurrentSegment;
+                    await _timeSegmentService.AdvanceTimeAsync(new SessionIdInput { SessionId = sessionId });
+                    stateUpdate.TimeAdvanced = true;
+
+                    if (DebugEnabled)
+                        AiDebugLogger.LogOrchestration("时段推进", $"时段已推进, SessionId={sessionId}");
+
+                    // 同步session对象的时段字段，保证后续代码使用最新值
+                    var updatedSession = await _sessionRep.GetFirstAsync(s => s.Id == sessionId);
+                    if (updatedSession != null)
+                    {
+                        session.CurrentDay = updatedSession.CurrentDay;
+                        session.CurrentSegment = updatedSession.CurrentSegment;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "时段推进失败: SessionId={SessionId}", sessionId);
                 }
             }
-            catch (Exception ex)
+            else
             {
-                _logger.LogWarning(ex, "时段推进失败: SessionId={SessionId}", sessionId);
+                stateUpdate.TimeAdvanced = true;
             }
         }
 
-        // 9. 更新NPC态度（仅NeedsStateChange时生效）
+        // 9. 更新NPC态度（仅NeedsStateChange时生效，DryRun时跳过）
         if (classification.NeedsStateChange && directorOutput.NpcActions != null)
         {
             stateUpdate.NpcAttitudeChanges = new Dictionary<string, int>();
@@ -399,7 +359,10 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
                 var npc = npcs.FirstOrDefault(n => n.NpcIdentifier == npcAction.NpcId);
                 if (npc != null)
                 {
-                    await _npcService.UpdateAttitudeAsync(sessionId, npc.Id, npcAction.AttitudeChange);
+                    if (!input.DryRun)
+                    {
+                        await _npcService.UpdateAttitudeAsync(sessionId, npc.Id, npcAction.AttitudeChange);
+                    }
                     stateUpdate.NpcAttitudeChanges[npcAction.NpcId] = npcAction.AttitudeChange;
                 }
             }
@@ -410,16 +373,20 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             AiDebugLogger.LogOrchestration("叙事AI", "准备NarrativeInput，由Hub流式推送");
 
         var npcLanguageCards = await BuildNpcLanguageCardsForScene(sessionId, directorOutput);
+        var sceneType = DetermineSceneType(directorOutput);
         var narrativeInput = new NarrativeInput
         {
             DirectorBlueprint = directorOutput,
             NpcLanguageCards = npcLanguageCards,
             RecentNarrative = BuildRecentNarrativeText(narrativeHistory),
             JudgmentResult = diceResult,
-            SceneType = DetermineSceneType(directorOutput),
+            SceneType = sceneType,
+            WordTarget = ResolveNarrativeWordTarget(directorOutput, sceneType),
             WorldContext = BuildNarrativeWorldContext(session, worldState),
             PlayerInventory = playerInventory,
-            CharacterName = characterName
+            CharacterName = characterName,
+            StyleBible = BuildStyleBibleText(session),
+            MotifTracker = BuildMotifTrackerText(session)
         };
 
         if (DebugEnabled)
@@ -427,19 +394,22 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             AiDebugLogger.LogOrchestration("流程结束", $"SessionId={sessionId}, 互动次数={session.InteractionCount + 1}");
         }
 
-        // 11. 更新会话计数器
-        session.InteractionCount++;
-        await _sessionRep.AsUpdateable(session)
-            .UpdateColumns(s => new { s.InteractionCount })
-            .ExecuteCommandAsync();
-
-        // 更新紧张度
-        if (directorOutput.Pacing != null)
+        // 11. 更新会话计数器（DryRun时跳过）
+        if (!input.DryRun)
         {
-            session.TensionLevel = directorOutput.Pacing.TensionLevel;
+            session.InteractionCount++;
             await _sessionRep.AsUpdateable(session)
-                .UpdateColumns(s => new { s.TensionLevel })
+                .UpdateColumns(s => new { s.InteractionCount })
                 .ExecuteCommandAsync();
+
+            // 更新紧张度
+            if (directorOutput.Pacing != null)
+            {
+                session.TensionLevel = directorOutput.Pacing.TensionLevel;
+                await _sessionRep.AsUpdateable(session)
+                    .UpdateColumns(s => new { s.TensionLevel })
+                    .ExecuteCommandAsync();
+            }
         }
 
         // 12. 返回结果（NarrativeInput由Hub流式推送叙事）
@@ -449,8 +419,11 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             DiceResult = diceResult,
             StateChanges = stateUpdate,
             IsChoicePoint = directorOutput.PlayerChoicePoint,
-            AcquiredItems = acquiredItems.Count > 0 ? acquiredItems : null,
-            HasConsumedItems = hasConsumedItems
+            SuggestedActions = directorOutput.SuggestedActions,
+            NeedsStateChange = classification.NeedsStateChange,
+            ItemHints = itemHints,
+            ActionIntent = classification.ActionIntent,
+            Feasibility = classification.Feasibility
         };
     }
 
@@ -509,6 +482,8 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
                 SideQuests = JsonConvert.SerializeObject(architectOutput.SideQuests, _jsonSettings),
                 HiddenContent = JsonConvert.SerializeObject(architectOutput.HiddenContent, _jsonSettings),
                 DifficultyParams = JsonConvert.SerializeObject(architectOutput.DifficultyParams, _jsonSettings),
+                StyleBibleJson = architectOutput.StyleBible != null ? JsonConvert.SerializeObject(architectOutput.StyleBible, _jsonSettings) : null,
+                MotifsJson = architectOutput.Motifs != null ? JsonConvert.SerializeObject(architectOutput.Motifs, _jsonSettings) : null,
                 CurrentDay = 1,
                 CurrentSegment = 0,
                 TensionLevel = 1,
@@ -554,14 +529,16 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             {
                 DirectorBlueprint = new DirectorOutput
                 {
-                    NarrativeDirection = "副本开场，玩家刚刚进入这个世界",
-                    Pacing = new PacingInfo { TensionLevel = 2, Note = "开场探索氛围" },
-                    SensoryHint = "醒来时的感官体验：光线、温度、声音"
+                    NarrativeSeed = "光线一点点渗进来，温度从脚底开始回升。远处有什么东西在响——是风，还是机械，你分不清。世界正在从模糊的边缘慢慢凝聚成形。",
+                    Pacing = new PacingInfo { TensionLevel = 2, Note = "开场探索氛围" }
                 },
                 NpcLanguageCards = new List<NpcLanguageCardDto>(),
                 RecentNarrative = "",
                 SceneType = "opening",
-                CharacterName = input.CharacterName
+                CharacterName = input.CharacterName,
+                WorldContext = BuildNarrativeWorldContext(session, null),
+                StyleBible = BuildStyleBibleText(session),
+                MotifTracker = BuildMotifTrackerText(session)
             };
 
             var openingNarrative = await _narrative.GenerateNarrativeAsync(openingInput, session.Id);
@@ -676,6 +653,74 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
         return string.Join("\n", parts);
     }
 
+        /// <summary>
+        /// 应用缓存行动结果到数据库（预计算缓存命中时由 Hub 调用）
+        /// </summary>
+        public async Task ApplyCachedActionResultAsync(long sessionId, GameActionResult result, string actionText)
+        {
+            var session = await _sessionRep.GetFirstAsync(s => s.Id == sessionId);
+            if (session == null) return;
+    
+            var character = await _characterRep.GetFirstAsync(c => c.SessionId == sessionId);
+            var directorOutput = result.NarrativeInput?.DirectorBlueprint;
+    
+            // 仅在分类AI判定需要状态变更时才执行持久化（与正常流程一致）
+            if (result.NeedsStateChange)
+            {
+                // 1. 应用世界状态变更
+                if (directorOutput?.WorldStateChanges != null)
+                {
+                    await _worldState.ApplyChangesAsync(sessionId, directorOutput.WorldStateChanges, session.InteractionCount);
+                }
+    
+                                // 2/3. 道具增减不再于此内联应用：缓存结果提交时由物资官(道具AI)依导演蓝图 item_hints 记账落库（见 GameSessionHub 缓存路径）。
+    
+                // 5. 更新NPC态度
+                if (directorOutput?.NpcActions != null)
+                {
+                    var npcs = await _npcService.GetCriticalNpcsAsync(sessionId);
+                    foreach (var npcAction in directorOutput.NpcActions.Where(n => n.AttitudeChange != 0))
+                    {
+                        try
+                        {
+                            var npc = npcs.FirstOrDefault(n => n.NpcIdentifier == npcAction.NpcId);
+                            if (npc != null)
+                            {
+                                await _npcService.UpdateAttitudeAsync(sessionId, npc.Id, npcAction.AttitudeChange);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "缓存行动NPC态度更新失败: {NpcId}", npcAction.NpcId);
+                        }
+                    }
+                }
+            }
+    
+            // 6. 更新交互计数和紧张度（与正常流程一致，不受NeedsStateChange限制，每次行动都必须递增）
+            session.InteractionCount++;
+            if (directorOutput?.Pacing != null)
+            {
+                session.TensionLevel = directorOutput.Pacing.TensionLevel;
+            }
+            await _sessionRep.AsUpdateable(session)
+                .UpdateColumns(s => new { s.InteractionCount, s.TensionLevel })
+                .ExecuteCommandAsync();
+    
+            // 4. 时段推进（已有 TimeAdvanced 守卫，不受 NeedsStateChange 影响）
+            if (result.StateChanges?.TimeAdvanced == true)
+            {
+                try
+                {
+                    await _timeSegmentService.AdvanceTimeAsync(new SessionIdInput { SessionId = sessionId });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "缓存行动时段推进失败: SessionId={SessionId}", sessionId);
+                }
+            }
+        }
+    
     #region 私有辅助方法
 
     private async Task<GameActionResult> HandleAdultAction(long sessionId, GameDungeonSession session, string actionText, List<GameNarrativeLog> narrativeHistory, string playerInventory, string characterName)
@@ -709,7 +754,7 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
     /// <summary>
     /// 构建叙事AI的世界上下文摘要（精简文本，供叙事AI维持世界观一致性）
     /// </summary>
-    private static string BuildNarrativeWorldContext(GameDungeonSession session, GameWorldState worldState)
+    public static string BuildNarrativeWorldContext(GameDungeonSession session, GameWorldState? worldState)
     {
         var sb = new StringBuilder();
 
@@ -869,6 +914,52 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
     }
 
     /// <summary>
+    /// 构建文风圣经文本（从session的StyleBibleJson解析并渲染为叙事AI可消费的文本）
+    /// </summary>
+    private static string BuildStyleBibleText(GameDungeonSession session)
+    {
+        if (string.IsNullOrEmpty(session.StyleBibleJson)) return "";
+        try
+        {
+            var sb = JsonConvert.DeserializeObject<StyleBibleData>(session.StyleBibleJson, _jsonSettings);
+            if (sb == null) return "";
+
+            var parts = new List<string>();
+            if (!string.IsNullOrEmpty(sb.Tone)) parts.Add($"语调: {sb.Tone}");
+            if (!string.IsNullOrEmpty(sb.SentenceRhythm)) parts.Add($"句式: {sb.SentenceRhythm}");
+            if (sb.SensoryPalette is { Count: > 0 }) parts.Add($"感官调色板: {string.Join("/", sb.SensoryPalette)}");
+            if (sb.ForbiddenCliches is { Count: > 0 }) parts.Add($"禁用陈词: {string.Join("、", sb.ForbiddenCliches)}");
+
+            return parts.Count > 0 ? string.Join("\n", parts) : "";
+        }
+        catch { return ""; }
+    }
+
+    /// <summary>
+    /// 构建意象追踪文本（从session的MotifsJson解析并渲染为叙事AI可消费的文本）
+    /// </summary>
+    private static string BuildMotifTrackerText(GameDungeonSession session)
+    {
+        if (string.IsNullOrEmpty(session.MotifsJson)) return "";
+        try
+        {
+            var motifs = JsonConvert.DeserializeObject<List<MotifData>>(session.MotifsJson, _jsonSettings);
+            if (motifs == null || motifs.Count == 0) return "";
+
+            var sb = new StringBuilder();
+            sb.AppendLine("贯穿意象（鼓励在叙事中使用，每次赋予新含义）:");
+            foreach (var m in motifs)
+            {
+                sb.AppendLine($"  - 「{m.Name}」初始: {m.InitialState}");
+                if (!string.IsNullOrEmpty(m.EvolutionHint))
+                    sb.AppendLine($"    进化方向: {m.EvolutionHint}");
+            }
+            return sb.ToString().TrimEnd();
+        }
+        catch { return ""; }
+    }
+
+    /// <summary>
     /// 构建玩家背包摘要文本（供导演AI上下文使用）
     /// </summary>
     private async Task<string> BuildPlayerInventoryText(long sessionId)
@@ -918,6 +1009,60 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
         }
     }
 
+    /// <summary>
+    /// 构建已知情报/无形资产清单文本（供分类AI做可行性判定的“可用资产清单”一部分）。
+    /// 空账本时返回空串。
+    /// </summary>
+    private async Task<string> BuildKnownAssetsText(long sessionId)
+    {
+        try
+        {
+            var assets = await _knownAssetService.ListValidAsync(new SessionIdInput { SessionId = sessionId });
+            if (assets == null || assets.Count == 0)
+                return "";
+
+            return string.Join("\n", assets.Select(a =>
+            {
+                var content = string.IsNullOrWhiteSpace(a.Content) ? "" : $"：{a.Content}";
+                return $"- [{a.AssetType}] {a.Name}{content}";
+            }));
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    /// <summary>
+    /// 兼容存量导演输出：当导演未给 item_hints 却仍输出了旧版 acquired_items/consumed_items 时，
+    /// 转换为非权威物资推荐线索，供物资官参考（不落库）。
+    /// </summary>
+    private static List<ItemHintInfo>? BuildLegacyItemHints(DirectorOutput directorOutput)
+    {
+        var hints = new List<ItemHintInfo>();
+        if (directorOutput.AcquiredItems is { Count: > 0 })
+        {
+            hints.AddRange(directorOutput.AcquiredItems.Select(a => new ItemHintInfo
+            {
+                Name = a.ItemName,
+                Category = "物品",
+                Change = "获得",
+                Note = a.Description
+            }));
+        }
+        if (directorOutput.ConsumedItems is { Count: > 0 })
+        {
+            hints.AddRange(directorOutput.ConsumedItems.Select(c => new ItemHintInfo
+            {
+                Name = c.ItemName,
+                Category = "物品",
+                Change = "消耗",
+                Note = c.Reason
+            }));
+        }
+        return hints.Count > 0 ? hints : null;
+    }
+
     private async Task<List<NpcLanguageCardDto>> BuildNpcLanguageCardsForScene(long sessionId, DirectorOutput directorOutput)
     {
         var cards = new List<NpcLanguageCardDto>();
@@ -944,35 +1089,88 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
         return cards;
     }
 
+    // 叙事目标字数的安全区间：防止导演给出离谱值导致注水或过短
+    // 上限提高到3000以支持章节档（chapter）的整章叙事
+    private const int MinNarrativeWordTarget = 80;
+    private const int MaxNarrativeWordTarget = 3000;
+
+    /// <summary>
+    /// 解析本轮叙事目标字数：
+    /// 优先按导演给出的 beat_scale 档位确定字数区间（micro/normal/chapter），
+    /// 导演给出的具体 narrative_word_target 在档位区间内生效、未给则取档位中值；
+    /// 导演未输出 beat_scale 时回退到场景类型默认值以保证向后兼容。
+    /// </summary>
+    private static int ResolveNarrativeWordTarget(DirectorOutput director, string sceneType)
+    {
+        var scale = (director.BeatScale ?? "").Trim().ToLowerInvariant();
+        var target = director.NarrativeWordTarget;
+
+        // 按节拍档位确定字数区间
+        var (lo, hi) = scale switch
+        {
+            "chapter" => (1800, 3000),
+            "normal" => (600, 1200),
+            "micro" => (200, 600),
+            _ => (0, 0) // 未分档：回退到旧的场景默认逻辑
+        };
+
+        if (lo == 0 && hi == 0)
+        {
+            if (target <= 0)
+            {
+                // 导演未输出目标字数时，按场景类型取一个居中的默认值
+                target = sceneType switch
+                {
+                    "daily" => 150,
+                    "dialogue" => 250,
+                    "action" => 200,
+                    "critical" => 500,
+                    "opening" or "exploration" => 250,
+                    _ => 250
+                };
+            }
+            return Math.Clamp(target, MinNarrativeWordTarget, MaxNarrativeWordTarget);
+        }
+
+        // 有分档：导演给的具体值优先，clamp 到档位区间；未给则取档位中值
+        if (target <= 0)
+            target = (lo + hi) / 2;
+        return Math.Clamp(target, lo, hi);
+    }
+
     private static string DetermineSceneType(DirectorOutput director)
     {
         if (director.Pacing == null) return "daily";
 
-        return director.Pacing.TensionLevel switch
-        {
-            <= 3 => "daily",
-            <= 5 => "dialogue",
-            <= 7 => "action",
-            _ => "critical"
-        };
+        var tension = director.Pacing.TensionLevel;
+
+        // 根据紧张度和叙事内容推断场景类型
+        // 高紧张 + 无NPC对话 = 战斗场景
+        if (tension >= 8) return "critical";
+        if (tension >= 6) return "action";
+
+        // 有NPC对话行为 = 对话场景
+        if (director.NpcActions is { Count: > 0 } &&
+            director.NpcActions.Any(n => n.DialogueDirection != null && !string.IsNullOrEmpty(n.DialogueDirection.Surface)))
+            return "dialogue";
+
+        // 低紧张 + 有narrative_hooks = 探索场景
+        if (tension <= 3 && director.NarrativeHooks is { Count: > 0 })
+            return "exploration";
+
+        // 低紧张 + 无NPC = 日常
+        if (tension <= 3) return "daily";
+
+        // 中等紧张 = 对话
+        return "dialogue";
     }
 
-    private async Task<ValidationContext> BuildValidationContext(long sessionId, string sceneType)
+    private async Task<ValidationContext> BuildValidationContext(long sessionId, int maxWordCount)
     {
         var character = await _characterRep.GetFirstAsync(c => c.SessionId == sessionId);
         var allNpcs = await _npcRep.AsQueryable()
             .Where(n => n.SessionId == sessionId)
             .ToListAsync();
-
-        var maxWordCount = sceneType switch
-        {
-            "daily" => 100,
-            "dialogue" => 200,
-            "action" => 300,
-            "critical" => 400,
-            "opening" => 300,
-            _ => 200
-        };
 
         // 获取隐藏内容关键词
         var session = await _sessionRep.GetFirstAsync(s => s.Id == sessionId);
@@ -1048,6 +1246,8 @@ public class ProcessActionInput
     public string ActionText { get; set; } = "";
     /// <summary>成人模式开关（前端玩家手动切换，开启后跳过分类AI和导演AI，直接走成人叙事）</summary>
     public bool IsAdultMode { get; set; }
+    /// <summary>干跑模式（预计算用，跳过所有DB写入但完整执行AI管线）</summary>
+    public bool DryRun { get; set; }
 
     /// <summary>
     /// 骰子掷出后的即时回调（用于在导演AI推演期间提前推送骰子结果给前端展示）

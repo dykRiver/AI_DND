@@ -61,6 +61,18 @@ public class GameDungeonSession : EntityBase
     public string? DifficultyParams { get; set; }
 
     /// <summary>
+    /// 文风圣经JSON（由建筑师AI一次性生成，每轮注入叙事AI）
+    /// </summary>
+    [SugarColumn(ColumnDescription = "文风圣经JSON", ColumnDataType = "nvarchar(max)", IsNullable = true)]
+    public string? StyleBibleJson { get; set; }
+
+    /// <summary>
+    /// 意象追踪JSON（由建筑师AI一次性生成的贯穿意象列表）
+    /// </summary>
+    [SugarColumn(ColumnDescription = "意象追踪JSON", ColumnDataType = "nvarchar(max)", IsNullable = true)]
+    public string? MotifsJson { get; set; }
+
+    /// <summary>
     /// 当前天数
     /// </summary>
     [SugarColumn(ColumnDescription = "当前天数", DefaultValue = "0")]

@@ -14,10 +14,22 @@ public class ClassificationResult
     /// <summary>原因</summary>
     public string? Reason { get; set; }
 
-    /// <summary>行动是否可行（分类AI判定，默认true）</summary>
-    public bool IsFeasible { get; set; } = true;
+    /// <summary>
+    /// 可行性三态：feasible（可行）/ uncertain（存疑，引用了疑似曾获得但账本查无，跑导演叙事终审）/ infeasible（凭空且无依据，短路拒绝）。
+    /// 默认 feasible。
+    /// </summary>
+    public string Feasibility { get; set; } = "feasible";
 
-    /// <summary>不可行原因（仅当IsFeasible=false时由AI输出）</summary>
+    /// <summary>是否可继续推进（非 infeasible 即放行；uncertain 也交给导演终审）</summary>
+    public bool IsFeasible => !string.Equals(Feasibility, "infeasible", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>是否不可行（凭空且无任何依据，短路拒绝）</summary>
+    public bool IsInfeasible => string.Equals(Feasibility, "infeasible", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>是否存疑（引用了疑似曾获得但账本查无，需导演叙事终审）</summary>
+    public bool IsUncertain => string.Equals(Feasibility, "uncertain", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>不可行原因（仅当 infeasible 时由AI输出）</summary>
     public string? InfeasibleReason { get; set; }
 
     /// <summary>是否需要状态变更（搜索/拾取/移动等需要更新世界状态或获取道具时为true）</summary>

@@ -24,6 +24,13 @@ public class GameAiOptions : IConfigurableOptions
     /// 是否启用调试日志（控制台实时输出AI调用链路和流式文字）
     /// </summary>
     public bool EnableDebugLog { get; set; }
+
+    /// <summary>
+    /// 章节档预取分镜段数（预计算时预生成的分镜数，默认1）。
+    /// 点选后先秒回放已预取的前 N 段，其余分镜在玩家阅读期间实时续写，掩盖生成延迟。
+    /// 0 或未配置时按 1 处理。
+    /// </summary>
+    public int ChapterPrefetchBeats { get; set; }
 }
 
 /// <summary>
@@ -61,4 +68,10 @@ public class AiModelConfig
     /// API密钥（每个模型独立配置）
     /// </summary>
     public string ApiKey { get; set; }
+
+    /// <summary>
+    /// 最大输出Token数（0=不设置，使用服务商默认上限）。
+    /// 章节档分段生成等长文场景应显式调高，避免单段被截断。
+    /// </summary>
+    public int MaxTokens { get; set; }
 }

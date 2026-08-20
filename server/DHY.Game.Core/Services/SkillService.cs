@@ -52,7 +52,7 @@ public class SkillService : IDynamicApiController, ITransient
     }
 
     /// <summary>
-    /// 初始化16项DND基础技能
+    /// 初始化16项DND基础技能（副本内快照，从Meta层拷贝）
     /// </summary>
     [DisplayName("初始化基础技能")]
     [HttpPost("initializeBaseSkills")]
@@ -66,7 +66,83 @@ public class SkillService : IDynamicApiController, ITransient
     }
 
     /// <summary>
-    /// 内部初始化方法（用于事务内调用）
+    /// 初始化Meta层16项基础技能（玩家永久记录，幂等）
+    /// 首次接触玩家时调用，后续结算时回写升级
+    /// </summary>
+    internal async Task InitializeMetaSkillsAsync(long metaId)
+    {
+        // 幂等：检查Meta层已存在的技能名
+        var existingNames = await _baseSkillRep.AsQueryable()
+            .Where(s => s.MetaId == metaId && s.CharacterId == null)
+            .Select(s => s.SkillName)
+            .ToListAsync();
+        var existingSet = new HashSet<string>(existingNames);
+
+        var skills = new List<GameBaseSkill>();
+        foreach (var (name, attr) in BaseSkillDefinitions)
+        {
+            if (existingSet.Contains(name))
+                continue;
+
+            skills.Add(new GameBaseSkill
+            {
+                Id = YitIdHelper.NextId(),
+                MetaId = metaId,
+                CharacterId = null,
+                SkillName = name,
+                LinkedAttribute = attr,
+                Level = 0,
+                Bonus = 0
+            });
+        }
+
+        if (skills.Count > 0)
+            await _db.Insertable(skills).ExecuteCommandAsync();
+    }
+
+    /// <summary>
+    /// 初始化副本内技能快照（从Meta层拷贝当前Level/Bonus，CharacterId指向本次角色）
+    /// </summary>
+    internal async Task InitializeCharacterSkillsFromMetaAsync(long metaId, long characterId)
+    {
+        // 幂等：副本层已存在该角色技能则跳过
+        var existingCount = await _baseSkillRep.AsQueryable()
+            .Where(s => s.CharacterId == characterId)
+            .CountAsync();
+        if (existingCount > 0)
+            return;
+
+        // 拉Meta层永久技能作为源
+        var metaSkills = await _baseSkillRep.AsQueryable()
+            .Where(s => s.MetaId == metaId && s.CharacterId == null)
+            .ToListAsync();
+
+        // Meta层还没初始化，则先初始化
+        if (metaSkills.Count == 0)
+        {
+            await InitializeMetaSkillsAsync(metaId);
+            metaSkills = await _baseSkillRep.AsQueryable()
+                .Where(s => s.MetaId == metaId && s.CharacterId == null)
+                .ToListAsync();
+        }
+
+        var snapshots = metaSkills.Select(m => new GameBaseSkill
+        {
+            Id = YitIdHelper.NextId(),
+            MetaId = metaId,
+            CharacterId = characterId,
+            SkillName = m.SkillName,
+            LinkedAttribute = m.LinkedAttribute,
+            Level = m.Level,
+            Bonus = m.Bonus
+        }).ToList();
+
+        if (snapshots.Count > 0)
+            await _db.Insertable(snapshots).ExecuteCommandAsync();
+    }
+
+    /// <summary>
+    /// 内部初始化方法（用于事务内调用，兼容旧路径，仅插入Level=0/Bonus=0的快照，无Meta层继承）
     /// </summary>
     internal async Task InitializeBaseSkillsInternalAsync(GameCharacter character)
     {

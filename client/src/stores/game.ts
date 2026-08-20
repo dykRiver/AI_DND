@@ -10,8 +10,11 @@ import type {
   SystemMessage,
   WorldInfo,
   InventoryUpdate,
+  KnownAssetsUpdate,
+  KnownAsset,
   SideQuestUpdate,
   SessionEndData,
+  SuggestedActionsData,
 } from '@/types/game'
 
 // ========== localStorage 持久化辅助 ==========
@@ -105,12 +108,18 @@ export const useGameStore = defineStore('game', () => {
   const backpackUpdate = ref<InventoryUpdate | null>(null)
   const showBackpack = ref(false)
 
+  // ★ 已知情报/无形资产（物资官记账登记）
+  const knownAssets = ref<KnownAsset[]>([])
+
   // ★ 成人模式开关
   const isAdultMode = ref(false)
 
   // ★ 结算数据
   const settlementData = ref<SessionEndData | null>(null)
   const showSettlement = ref(false)
+
+  // ★ 建议行动选项（预计算快速选择）
+  const suggestedActions = ref<SuggestedActionsData | null>(null)
 
   function toggleAdultMode() {
     isAdultMode.value = !isAdultMode.value
@@ -232,6 +241,11 @@ export const useGameStore = defineStore('game', () => {
     showBackpack.value = !showBackpack.value
   }
 
+  /// 更新已知情报（物资官记账后推送全量有效情报）
+  function updateKnownAssets(data: KnownAssetsUpdate) {
+    knownAssets.value = data.assets ?? []
+  }
+
   /// 更新支线任务完成状态（导演AI标记完成时推送）
   function updateSideQuestStatus(update: SideQuestUpdate) {
     if (!worldInfo.value) return
@@ -264,6 +278,14 @@ export const useGameStore = defineStore('game', () => {
     showSettlement.value = true
   }
 
+  function setSuggestedActions(data: SuggestedActionsData) {
+    suggestedActions.value = data
+  }
+
+  function clearSuggestedActions() {
+    suggestedActions.value = null
+  }
+
   function clearSession() {
     sessionId.value = ''
     narrativeChunks.value = []
@@ -276,6 +298,8 @@ export const useGameStore = defineStore('game', () => {
     showWorldInfo.value = false
     isLoading.value = false
     isInputDisabled.value = false
+    suggestedActions.value = null
+    knownAssets.value = []
     clearPersistedState()
   }
 
@@ -293,6 +317,9 @@ export const useGameStore = defineStore('game', () => {
     systemMessages.value = []
     isInputDisabled.value = false
     isLoading.value = false
+    suggestedActions.value = null
+    // 重开后端已清空情报账本，前端同步清空避免展示旧周目线索
+    knownAssets.value = []
   }
 
   /// 从服务端恢复会话上下文（断线续玩专用，不清空叙事历史）
@@ -332,6 +359,7 @@ export const useGameStore = defineStore('game', () => {
     showWorldInfo,
     backpackUpdate,
     showBackpack,
+    knownAssets,
     isAdultMode,
     settlementData,
     showSettlement,
@@ -353,8 +381,12 @@ export const useGameStore = defineStore('game', () => {
     toggleWorldInfo,
     updateBackpack,
     toggleBackpack,
+    updateKnownAssets,
     updateSideQuestStatus,
     setSettlementData,
+    suggestedActions,
+    setSuggestedActions,
+    clearSuggestedActions,
     clearSession,
     clearNarrativeHistory,
     restoreFromServer,

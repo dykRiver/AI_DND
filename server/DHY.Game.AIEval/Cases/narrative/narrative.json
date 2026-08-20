@@ -1,0 +1,155 @@
+[
+  {
+    "id": "nar_explore_01",
+    "desc": "探索场景：字数落区间、玩家名保真、无禁用陈词",
+    "input": {
+      "scene_type": "explore",
+      "word_target": 600,
+      "character_name": "陈默",
+      "style_bible": "文风基调：冷硬写实，1997年港式罪案片质感。短句为主，动词锋利，克制使用形容词。感官顺序：先听觉（雨声/机械声）再嗅觉（柴油/铁锈/海水）最后视觉。禁用陈词清单：令人毛骨悚然、不寒而栗、脊背发凉、心里咯噔一下。",
+      "motif_tracker": "滴水声：前两拍已各出现一次，本拍可再呼应一次，不宜更多。",
+      "world_context": "1997年港城码头。玩家陈默是警方卧底，刚撬开三号仓库侧门进入仓库内部。仓库里堆着标着海产品的木箱，深处有间铁皮隔间。",
+      "player_inventory": "撬锁工具 x1（已损坏）",
+      "recent_narrative": "挂锁落地的一瞬，雨声恰好盖过了金属的响动。陈默侧身闪进侧门，黑暗像潮水一样合拢过来。",
+      "npc_language_cards": [],
+      "blueprint": {
+        "narrative_seed": "仓库内部比外面听起来更大。木箱的阴影排成街道，柴油味混着咸鱼腥。铁皮隔间的门缝里透出一线微光，里面隐约有纸页翻动的声响。",
+        "prose_guidance": "短句铺陈空间感，先声后味再光。悬念落在铁皮隔间那一线光上，不要揭底。",
+        "beat_scale": "normal",
+        "narrative_word_target": 600,
+        "suggested_actions": [
+          { "action_text": "摸向铁皮隔间", "hint": "潜行探索方向" },
+          { "action_text": "先翻看木箱标签", "hint": "调查方向" }
+        ]
+      }
+    },
+    "expect": {
+      "word_range": [420, 780],
+      "forbidden_words": ["令人毛骨悚然", "不寒而栗", "脊背发凉", "心里咯噔一下"],
+      "must_mention": [],
+      "judge": true
+    }
+  },
+  {
+    "id": "nar_dialogue_01",
+    "desc": "对话场景：NPC语言风格落地、隐瞒信息（蛇哥真名）不得泄露",
+    "input": {
+      "scene_type": "dialogue",
+      "word_target": 500,
+      "character_name": "陈默",
+      "style_bible": "文风基调：冷硬写实，1997年港式罪案片质感。对话要口语化、带港味，人物说话有毛边不工整。禁用陈词清单：令人毛骨悚然、不寒而栗、脊背发凉、心里咯噔一下。",
+      "motif_tracker": "（无活跃意象）",
+      "world_context": "1997年港城，醉金楼VIP包厢。玩家陈默是警方卧底，正与蛇哥喝酒打探货期。蛇哥半醉，话多了但关键处守口如瓶。",
+      "player_inventory": "（无道具）",
+      "recent_narrative": "",
+      "npc_language_cards": [
+        {
+          "npc_name": "蛇哥",
+          "language_style": "老派江湖口吻，喜欢用码头行话和比喻，说话留半句",
+          "catchphrase": "食得咸鱼抵得渴",
+          "current_attitude": 45
+        }
+      ],
+      "blueprint": {
+        "narrative_seed": "蛇哥把杯里的酒晃了晃，冰块撞着杯壁响。他笑着说起下批货的行情，却在问到具体日子时把话头拐了个弯，扯到当年跑船的旧事上。",
+        "prose_guidance": "对话为主，穿插蛇哥的身体语言（手指敲杯、眼神回避）。陈默的试探要藏得拙一点，别写成审讯。",
+        "beat_scale": "micro",
+        "narrative_word_target": 500,
+        "npc_actions": [
+          {
+            "npc_id": "蛇哥",
+            "action": "蛇哥岔开话题，暗示货期这种事问多了伤感情",
+            "dialogue_direction": {
+              "surface": "「货嘛，看天吃饭的，急什么。」",
+              "subtext": "起了一点疑心，用江湖话把话题压回去",
+              "conceal": "具体货期是周四凌晨；蛇哥的真名是李国栋",
+              "body_language": "手指在杯沿上敲了两下，眼神从陈默脸上滑开"
+            },
+            "attitude_change": -5
+          }
+        ],
+        "suggested_actions": [
+          { "action_text": "举杯岔开话题", "hint": "社交缓和方向" },
+          { "action_text": "继续旁敲侧击", "hint": "社交打探方向" }
+        ]
+      }
+    },
+    "expect": {
+      "word_range": [325, 780],
+      "forbidden_words": ["令人毛骨悚然", "不寒而栗", "脊背发凉", "心里咯噔一下"],
+      "must_mention": [],
+      "forbidden_facts": ["李国栋", "周四凌晨"],
+      "judge": true
+    }
+  },
+  {
+    "id": "nar_combat_01",
+    "desc": "搏斗场景：动作短句节奏、玩家名保真、禁用陈词",
+    "input": {
+      "scene_type": "combat",
+      "word_target": 600,
+      "character_name": "陈默",
+      "style_bible": "文风基调：冷硬写实，搏斗戏用短句+身体实感（痛感/重心/呼吸），禁止华丽武侠化描写。禁用陈词清单：令人毛骨悚然、不寒而栗、脊背发凉、心里咯噔一下。",
+      "motif_tracker": "（无活跃意象）",
+      "world_context": "1997年港城码头仓库外。玩家陈默被马仔阿强堵住，对方手里有刀，陈默徒手。雨刚停，地面湿滑。",
+      "player_inventory": "（无道具）",
+      "recent_narrative": "手电的光柱钉在陈默脸上，阿强把刀从腰间抽了出来，刀刃上还挂着雨水。",
+      "npc_language_cards": [
+        {
+          "npc_name": "阿强",
+          "language_style": "话少，狠，动手前喜欢啐一口",
+          "catchphrase": "",
+          "current_attitude": -50
+        }
+      ],
+      "blueprint": {
+        "narrative_seed": "刀尖挑开雨幕，阿强的第一步踩进了积水里。陈默往集装箱的阴影退了半步，把重心压低——湿的地面对谁都是把双刃刀。",
+        "prose_guidance": "短句，动作写物理实感：脚底打滑、刀刃风声、呼吸节奏。一个回合内收住，不写成长打。",
+        "beat_scale": "normal",
+        "narrative_word_target": 600,
+        "suggested_actions": [
+          { "action_text": "抢身位夺刀", "hint": "搏斗方向" },
+          { "action_text": "借集装箱周旋", "hint": "机动方向" }
+        ]
+      }
+    },
+    "expect": {
+      "word_range": [420, 780],
+      "forbidden_words": ["令人毛骨悚然", "不寒而栗", "脊背发凉", "心里咯噔一下"],
+      "must_mention": [],
+      "judge": true
+    }
+  },
+  {
+    "id": "nar_horror_01",
+    "desc": "恐怖长文：2000字档字数区间、禁用陈词、意象（滴水声）呼应",
+    "input": {
+      "scene_type": "horror",
+      "word_target": 2000,
+      "character_name": "陈默",
+      "style_bible": "文风基调：冷硬写实底色上的心理恐怖，恐惧来自细节异常而非怪物。缓慢堆叠，多用停顿与留白。禁用陈词清单：令人毛骨悚然、不寒而栗、脊背发凉、心里咯噔一下。",
+      "motif_tracker": "滴水声：已作为不安意象出现三次，本拍是它最后一次出现，应有变奏（节奏改变或停止）。",
+      "world_context": "1997年港城码头。陈默深夜独自回到三号仓库取回藏起的证据，却发现仓库里的木箱位置全部变了，铁皮隔间的门开着，里面那盏灯还亮着。",
+      "player_inventory": "手电 x1（杂物，重量0.5）",
+      "recent_narrative": "",
+      "npc_language_cards": [],
+      "blueprint": {
+        "narrative_seed": "手电扫过第一排木箱时，陈默就发现了不对——箱子的朝向全变了，像是有人一夜之间把它们逐寸挪过。滴水声还在继续，但比记忆里慢了半拍。铁皮隔间的门敞着，灯亮着，桌上多了一杯还在冒热气的茶。",
+        "prose_guidance": "恐怖感全部来自细节异常（挪动的箱子、热茶、变慢的滴水声），不出现任何实体威胁。段落由短渐长再收短，收尾停在滴水声停止的一刻。",
+        "beat_scale": "normal",
+        "narrative_word_target": 2000,
+        "narrative_hooks": ["那杯茶是给谁倒的", "滴水声为何变慢"],
+        "suggested_actions": [
+          { "action_text": "检查铁皮隔间", "hint": "探索方向" },
+          { "action_text": "先退出仓库", "hint": "自保方向" }
+        ]
+      }
+    },
+    "expect": {
+      "word_range": [1400, 2600],
+      "forbidden_words": ["令人毛骨悚然", "不寒而栗", "脊背发凉", "心里咯噔一下"],
+      "must_mention": [],
+      "judge": true
+    }
+  }
+]

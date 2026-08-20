@@ -98,6 +98,10 @@ public class DungeonArchitectService : ITransient
             {
                 AiDebugLogger.LogCallChain("Architect", $"副本生成完成, NPC数: {output.Npcs?.Count ?? 0}, 主线: {output.MainQuest?.Objective}");
                 AiDebugLogger.LogCallChain("Architect", $"世界设定: {output.WorldSetting?.Era} | {output.WorldSetting?.Geography}");
+                if (output.StyleBible != null)
+                    AiDebugLogger.LogCallChain("Architect", $"文风圣经: 语调={output.StyleBible.Tone}");
+                if (output.Motifs != null)
+                    AiDebugLogger.LogCallChain("Architect", $"意象数: {output.Motifs.Count}");
             }
 
             return output;

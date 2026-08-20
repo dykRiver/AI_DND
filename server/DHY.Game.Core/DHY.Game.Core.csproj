@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DHY.Game.AI" />
+    <InternalsVisibleTo Include="DHY.Game.Hub" />
   </ItemGroup>
 
   <ItemGroup>

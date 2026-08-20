@@ -45,6 +45,11 @@ export function useGameSession() {
     await signalR.sendPlayerAction(gameStore.sessionId, text, gameStore.isAdultMode)
   }
 
+  async function selectCachedAction(optionIndex: number, actionText: string) {
+    if (!gameStore.sessionId) return
+    await signalR.selectCachedAction(gameStore.sessionId, optionIndex, actionText)
+  }
+
   async function handleTimeAdvance(choice: string) {
     if (!gameStore.sessionId) return
     await signalR.confirmTimeAdvance(gameStore.sessionId, choice)
@@ -89,6 +94,7 @@ export function useGameSession() {
     initConnection,
     startDungeon,
     sendAction,
+    selectCachedAction,
     handleTimeAdvance,
     handleOvertime,
     handleDangerConfirm,

@@ -1,3 +1,5 @@
+using Yitter.IdGenerator;
+
 namespace DHY.Game.Core.Services;
 
 /// <summary>
@@ -9,6 +11,9 @@ public class MetaProgressionService : IDynamicApiController, ITransient
     private readonly SqlSugarRepository<GamePlayerMeta> _metaRep;
     private readonly SqlSugarRepository<GameDungeonResult> _resultRep;
     private readonly SqlSugarRepository<GameExpertiseSkill> _expertiseRep;
+    private readonly SqlSugarRepository<GameBaseSkill> _baseSkillRep;
+    private readonly SqlSugarRepository<GameCharacter> _characterRep;
+    private readonly SkillService _skillService;
     private readonly ISqlSugarClient _db;
     private readonly GameOptions _options;
 
@@ -34,12 +39,18 @@ public class MetaProgressionService : IDynamicApiController, ITransient
         SqlSugarRepository<GamePlayerMeta> metaRep,
         SqlSugarRepository<GameDungeonResult> resultRep,
         SqlSugarRepository<GameExpertiseSkill> expertiseRep,
+        SqlSugarRepository<GameBaseSkill> baseSkillRep,
+        SqlSugarRepository<GameCharacter> characterRep,
+        SkillService skillService,
         ISqlSugarClient db,
         IOptions<GameOptions> options)
     {
         _metaRep = metaRep;
         _resultRep = resultRep;
         _expertiseRep = expertiseRep;
+        _baseSkillRep = baseSkillRep;
+        _characterRep = characterRep;
+        _skillService = skillService;
         _db = db;
         _options = options.Value;
     }
@@ -168,7 +179,7 @@ public class MetaProgressionService : IDynamicApiController, ITransient
     }
 
     /// <summary>
-    /// 副本结束后同步Meta
+    /// 副本结束后同步Meta（幂等：重复调用跳过已应用的奖励）
     /// </summary>
     [DisplayName("同步副本结果到Meta")]
     [HttpPost("syncDungeonResult")]
@@ -178,13 +189,20 @@ public class MetaProgressionService : IDynamicApiController, ITransient
         if (result == null)
             throw Oops.Oh("未找到该副本的结算结果");
 
+        // 幂等保护：已应用过的奖励直接跳过
+        if (result.IsRewardApplied)
+            return;
+
         try
         {
             _db.AsTenant().BeginTran();
 
             var meta = await GetMetaAsync(new UserIdInput { UserId = input.UserId });
 
-            // 1. 增加经验值
+            // 1. 确保Meta层基础技能已初始化（老玩家首次触发结算时补建）
+            await _skillService.InitializeMetaSkillsAsync(meta.Id);
+
+            // 2. 增加经验值 + 升级检查 (升级时 +1 天赋点)
             meta.Experience += result.RewardMetaExp;
             while (meta.MetaLevel < MaxMetaLevel)
             {
@@ -198,15 +216,24 @@ public class MetaProgressionService : IDynamicApiController, ITransient
                 else break;
             }
 
-            // 2. 更新DungeonCount
+            // 3. DungeonCount++
             meta.DungeonCount++;
 
             await _metaRep.AsUpdateable(meta)
                 .UpdateColumns(m => new { m.Experience, m.MetaLevel, m.TalentPoints, m.DungeonCount })
                 .ExecuteCommandAsync();
 
-            // 3. 同步专精技能(副本内学到的回写Meta层)
+            // 4. 基础技能回写Meta层：副本内快照的Level若高于Meta层，则升级Meta层
+            await SyncBaseSkillsAsync(meta.Id, input.SessionId);
+
+            // 5. 专精技能回写Meta层
             await SyncExpertiseSkillsAsync(meta.Id, input.SessionId);
+
+            // 6. 标记奖励已应用（幂等）
+            result.IsRewardApplied = true;
+            await _resultRep.AsUpdateable(result)
+                .UpdateColumns(r => new { r.IsRewardApplied })
+                .ExecuteCommandAsync();
 
             _db.AsTenant().CommitTran();
         }
@@ -214,6 +241,90 @@ public class MetaProgressionService : IDynamicApiController, ITransient
         {
             _db.AsTenant().RollbackTran();
             throw;
+        }
+    }
+
+    /// <summary>
+    /// 同步基础技能到Meta层（副本内Level高于Meta层则升级）
+    /// </summary>
+    private async Task SyncBaseSkillsAsync(long metaId, long sessionId)
+    {
+        var character = await _characterRep.GetFirstAsync(c => c.SessionId == sessionId);
+        if (character == null)
+            return;
+
+        // 本次副本内快照
+        var snapshotSkills = await _baseSkillRep.AsQueryable()
+            .Where(s => s.CharacterId == character.Id)
+            .ToListAsync();
+
+        foreach (var snapshot in snapshotSkills)
+        {
+            var metaSkill = await _baseSkillRep.GetFirstAsync(s =>
+                s.MetaId == metaId &&
+                s.CharacterId == null &&
+                s.SkillName == snapshot.SkillName);
+
+            if (metaSkill == null)
+            {
+                // Meta层缺失则补建（理论上InitializeMetaSkillsAsync已处理）
+                metaSkill = new GameBaseSkill
+                {
+                    Id = YitIdHelper.NextId(),
+                    MetaId = metaId,
+                    CharacterId = null,
+                    SkillName = snapshot.SkillName,
+                    LinkedAttribute = snapshot.LinkedAttribute,
+                    Level = snapshot.Level,
+                    Bonus = snapshot.Bonus
+                };
+                await _baseSkillRep.AsInsertable(metaSkill).ExecuteCommandAsync();
+                continue;
+            }
+
+            if (snapshot.Level > metaSkill.Level)
+            {
+                metaSkill.Level = snapshot.Level;
+                metaSkill.Bonus = snapshot.Bonus;
+                await _baseSkillRep.AsUpdateable(metaSkill)
+                    .UpdateColumns(s => new { s.Level, s.Bonus })
+                    .ExecuteCommandAsync();
+            }
+        }
+    }
+
+    /// <summary>
+    /// 同步专精技能到Meta层
+    /// </summary>
+    private async Task SyncExpertiseSkillsAsync(long metaId, long sessionId)
+    {
+        // 获取该会话角色的专精技能
+        var character = await _characterRep.GetFirstAsync(c => c.SessionId == sessionId);
+        if (character == null)
+            return;
+
+        var dungeonSkills = await _expertiseRep.AsQueryable()
+            .Where(e => e.CharacterId == character.Id && e.IsActive)
+            .ToListAsync();
+
+        foreach (var skill in dungeonSkills)
+        {
+            var metaSkill = await _expertiseRep.GetFirstAsync(e =>
+                e.MetaId == metaId &&
+                e.CharacterId == null &&
+                e.SkillName == skill.SkillName &&
+                e.IsActive);
+
+            if (metaSkill != null)
+            {
+                if (skill.Level > metaSkill.Level)
+                {
+                    metaSkill.Level = skill.Level;
+                    await _expertiseRep.AsUpdateable(metaSkill)
+                        .UpdateColumns(e => new { e.Level })
+                        .ExecuteCommandAsync();
+                }
+            }
         }
     }
 
@@ -273,37 +384,6 @@ public class MetaProgressionService : IDynamicApiController, ITransient
     }
 
     #region 内部方法
-
-    /// <summary>
-    /// 同步专精技能到Meta层
-    /// </summary>
-    private async Task SyncExpertiseSkillsAsync(long metaId, long sessionId)
-    {
-        // 获取该会话角色的专精技能
-        var dungeonSkills = await _expertiseRep.AsQueryable()
-            .Where(e => e.CharacterId != null && e.IsActive)
-            .ToListAsync();
-
-        foreach (var skill in dungeonSkills)
-        {
-            var metaSkill = await _expertiseRep.GetFirstAsync(e =>
-                e.MetaId == metaId &&
-                e.CharacterId == null &&
-                e.SkillName == skill.SkillName &&
-                e.IsActive);
-
-            if (metaSkill != null)
-            {
-                if (skill.Level > metaSkill.Level)
-                {
-                    metaSkill.Level = skill.Level;
-                    await _expertiseRep.AsUpdateable(metaSkill)
-                        .UpdateColumns(e => new { e.Level })
-                        .ExecuteCommandAsync();
-                }
-            }
-        }
-    }
 
     /// <summary>
     /// 获取属性Bonus值

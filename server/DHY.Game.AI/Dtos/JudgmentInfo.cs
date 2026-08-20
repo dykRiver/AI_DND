@@ -15,9 +15,9 @@ public class JudgmentInfo
     [JsonProperty("skill")]
     public string? Skill { get; set; }
 
-    /// <summary>难度等级</summary>
+    /// <summary>难度等级（needed=false 时模型可能输出 null，须容忍）</summary>
     [JsonProperty("dc")]
-    public int Dc { get; set; }
+    public int? Dc { get; set; }
 
     /// <summary>是否有优势</summary>
     [JsonProperty("advantage")]

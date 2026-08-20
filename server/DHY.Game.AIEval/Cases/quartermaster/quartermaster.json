@@ -1,0 +1,131 @@
+[
+  {
+    "id": "qm_acquire_key_01",
+    "desc": "获得关键道具：黄铜钥匙须登记且数值字段补全",
+    "player_action": "我拉开没上锁的抽屉，从里面拿出那串仓库钥匙",
+    "item_hints_text": "1. 名称：黄铜钥匙；类别：物品；变更：获得；说明：值班室抽屉里找到的仓库钥匙，可开三号仓库正门；关键：是",
+    "blueprint": [
+      {
+        "name": "黄铜钥匙",
+        "category": "物品",
+        "change": "获得",
+        "note": "值班室抽屉里找到的仓库钥匙，可开三号仓库正门",
+        "is_key": true
+      }
+    ],
+    "current_ledger": "（当前账本为空）",
+    "expect": {
+      "acquired_item_names": ["钥匙"]
+    }
+  },
+  {
+    "id": "qm_info_only_01",
+    "desc": "获得情报：纸条内容须进 acquired_info，不得混入物理道具（历史缺陷模式：情报当道具记账）",
+    "player_action": "我展开从马仔身上搜出的纸条，上面写着：货周四凌晨到，三号泊位",
+    "item_hints_text": "1. 名称：货期情报；类别：情报；变更：获得；说明：纸条内容——下一批货周四凌晨到港，停靠三号泊位；关键：是",
+    "blueprint": [
+      {
+        "name": "货期情报",
+        "category": "情报",
+        "change": "获得",
+        "note": "纸条内容：下一批货周四凌晨到港，停靠三号泊位",
+        "is_key": true
+      }
+    ],
+    "current_ledger": "（当前账本为空）",
+    "expect": {
+      "acquired_info_names": ["货期"]
+    }
+  },
+  {
+    "id": "qm_consume_01",
+    "desc": "消耗道具：撬锁工具损坏须登记到消耗分组，不得重复登记获得",
+    "player_action": "挂锁开了，但撬锁工具断在了锁眼里",
+    "item_hints_text": "1. 名称：撬锁工具；类别：物品；变更：消耗；说明：撬开仓库挂锁时断在锁眼，无法再用；关键：否",
+    "blueprint": [
+      {
+        "name": "撬锁工具",
+        "category": "物品",
+        "change": "消耗",
+        "note": "撬开仓库挂锁时断在锁眼，无法再用",
+        "is_key": false
+      }
+    ],
+    "current_ledger": "【背包】撬锁工具 x1（关键道具，重量1）\n【已知情报】（无）",
+    "expect": {
+      "consumed_item_names": ["撬锁"]
+    }
+  },
+  {
+    "id": "qm_lost_01",
+    "desc": "遗失道具：翻墙时掉落对讲机须登记到遗失分组",
+    "player_action": "我翻过码头围栏时，对讲机从口袋里掉了出去，捡不回来了",
+    "item_hints_text": "1. 名称：对讲机；类别：物品；变更：失去；说明：翻围栏时掉落到围栏外，无法取回；关键：否",
+    "blueprint": [
+      {
+        "name": "对讲机",
+        "category": "物品",
+        "change": "失去",
+        "note": "翻围栏时掉落到围栏外，无法取回",
+        "is_key": false
+      }
+    ],
+    "current_ledger": "【背包】对讲机 x1（杂物，重量0.5）\n【已知情报】（无）",
+    "expect": {
+      "lost_item_names": ["对讲机"]
+    }
+  },
+  {
+    "id": "qm_invalidate_01",
+    "desc": "情报失效：旧货期情报被新情报取代，须登记到失效分组",
+    "player_action": "我记下蛇哥说的新货期，之前打探到的周二那个日子作废了",
+    "item_hints_text": "1. 名称：旧货期情报；类别：情报；变更：失去；说明：原情报'货周二晚到港'已被新货期取代，不再有效；关键：否",
+    "blueprint": [
+      {
+        "name": "旧货期情报",
+        "category": "情报",
+        "change": "失去",
+        "note": "原情报'货周二晚到港'已被新货期取代，不再有效",
+        "is_key": false
+      }
+    ],
+    "current_ledger": "【背包】（无）\n【已知情报】旧货期情报：货周二晚到港",
+    "expect": {
+      "invalidated_info_names": ["货期"]
+    }
+  },
+  {
+    "id": "qm_mixed_01",
+    "desc": "混合蓝图：道具+情报一次登记，逐条落实不丢不多",
+    "player_action": "我把抽屉里的钥匙和打火机都揣进口袋，又看了眼那张写着货期的纸条",
+    "item_hints_text": "1. 名称：黄铜钥匙；类别：物品；变更：获得；说明：值班室抽屉里的仓库钥匙；关键：是\n2. 名称：打火机；类别：物品；变更：获得；说明：普通煤油打火机；关键：否\n3. 名称：货期情报；类别：情报；变更：获得；说明：纸条内容：货周四凌晨到港，三号泊位；关键：是",
+    "blueprint": [
+      {
+        "name": "黄铜钥匙",
+        "category": "物品",
+        "change": "获得",
+        "note": "值班室抽屉里的仓库钥匙",
+        "is_key": true
+      },
+      {
+        "name": "打火机",
+        "category": "物品",
+        "change": "获得",
+        "note": "普通煤油打火机",
+        "is_key": false
+      },
+      {
+        "name": "货期情报",
+        "category": "情报",
+        "change": "获得",
+        "note": "纸条内容：货周四凌晨到港，三号泊位",
+        "is_key": true
+      }
+    ],
+    "current_ledger": "（当前账本为空）",
+    "expect": {
+      "acquired_item_names": ["钥匙", "打火机"],
+      "acquired_info_names": ["货期"]
+    }
+  }
+]
