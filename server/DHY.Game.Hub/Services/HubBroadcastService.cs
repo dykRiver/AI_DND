@@ -72,12 +72,12 @@ public class HubBroadcastService : ITransient
 
                 await client.ReceiveNarrative(narrativeChunk);
 
-                // 首字符到达时记录延迟
+                // 埋点②：叙事首token延迟（流式开始→首个chunk），去掉门控确保总记录，带 sessionId 便于关联
                 if (isFirst)
                 {
                     isFirst = false;
-                    if (_options.StreamChunkDelayMs > 0)
-                        _logger.LogDebug("叙事首token延迟: {Delay}ms", sw.ElapsedMilliseconds);
+                    _logger.LogInformation("叙事首token延迟: SessionId={SessionId}, 延迟ms={Delay}",
+                        sessionId, sw.ElapsedMilliseconds);
                 }
             }
 

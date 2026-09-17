@@ -58,6 +58,23 @@ async function resumeDungeon() {
       })
     }
 
+    // 恢复离开前最后一轮的建议行动选项（方案A：续上离开前一刻）
+    //   IsComputing=false：不重跑预计算，直接以文本显示按钮
+    //   点选后服务端自动分流：内存缓存命中→秒响应；未命中→以 ActionText 走常规全链路
+    const restoredOptions = activeSession.value.suggestedActions
+    if (restoredOptions && restoredOptions.length >= 2) {
+      gameStore.setSuggestedActions({
+        options: restoredOptions.slice(0, 2).map(o => ({
+          index: o.index,
+          actionText: o.actionText,
+          hint: o.hint,
+          // 恢复路径不预置可行性（默认true），避免错误置灰；点选后由服务端判定
+          isFeasible: true,
+        })),
+        isComputing: false,
+      })
+    }
+
     // 2. 连接 SignalR 并注册 DungeonReady 回调
     await signalR.connect()
     signalR.onDungeonReady(() => {

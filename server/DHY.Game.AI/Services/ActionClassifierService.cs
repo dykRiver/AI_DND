@@ -72,7 +72,7 @@ public class ActionClassifierService : ITransient
                 var judgmentDetail = j != null
                     ? $"Judgment(needed={j.Needed}, skill={j.Skill}, dc={j.Dc}, advantage={j.Advantage}, disadvantage={j.Disadvantage}, context={j.Context})"
                     : "Judgment=null";
-                AiDebugLogger.LogCallChain("Classifier", $"分类结果: IsRoutine={classificationResult.IsRoutine}, NeedsStateChange={classificationResult.NeedsStateChange}, Feasibility={classificationResult.Feasibility}, IsAdult={classificationResult.IsAdult}, ActionIntent={classificationResult.ActionIntent}, Confidence={classificationResult.Confidence}, Reason={classificationResult.Reason}, {judgmentDetail}");
+                AiDebugLogger.LogCallChain("Classifier", $"分类结果: IsRoutine={classificationResult.IsRoutine}, Feasibility={classificationResult.Feasibility}, IsAdult={classificationResult.IsAdult}, ActionIntent={classificationResult.ActionIntent}, Confidence={classificationResult.Confidence}, Reason={classificationResult.Reason}, {judgmentDetail}");
             }
 
             return classificationResult;
@@ -123,7 +123,6 @@ public class ActionClassifierService : ITransient
                 Reason = root["reason"]?.Value<string>(),
                 Feasibility = feasibilityStr,
                 InfeasibleReason = root["infeasible_reason"]?.Value<string>(),
-                NeedsStateChange = root["needs_state_change"]?.Value<bool>() ?? false,
                 IsAdult = root["is_adult"]?.Value<bool>() ?? false,
                 ActionIntent = root["action_intent"]?.Value<string>(),
                 Judgment = judgment

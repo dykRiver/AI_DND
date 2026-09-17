@@ -65,6 +65,13 @@ public class ActiveSessionCheckOutput
 
     /// <summary>最近叙事记录（用于恢复上下文）</summary>
     public List<ActiveSessionNarrative> RecentNarratives { get; set; } = new();
+
+    /// <summary>
+    /// 恢复副本时展示的建议行动选项（来自 session.LastSuggestedActions）。
+    /// 前端直接以文本显示按钮，点选后服务端自动分流：
+    /// 内存预计算缓存命中→秒响应；未命中/过期→以 ActionText 走常规全链路。
+    /// </summary>
+    public List<ActiveSessionSuggestedAction> SuggestedActions { get; set; } = new();
 }
 
 public class ActiveSessionWorldInfo
@@ -96,4 +103,19 @@ public class ActiveSessionNarrative
 
     /// <summary>类型：narrative/action_result/scene_transition</summary>
     public string ChunkType { get; set; } = "narrative";
+}
+
+/// <summary>
+/// 活跃会话恢复时的建议行动选项（仅文本，不携带可行性标志：可行性由服务端点选时自动判定）
+/// </summary>
+public class ActiveSessionSuggestedAction
+{
+    /// <summary>选项索引（0或1）</summary>
+    public int Index { get; set; }
+
+    /// <summary>行动文本</summary>
+    public string ActionText { get; set; } = "";
+
+    /// <summary>方向提示（如“社交互动”“潜行探索”）</summary>
+    public string Hint { get; set; } = "";
 }

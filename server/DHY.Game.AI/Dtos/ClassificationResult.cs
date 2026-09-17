@@ -32,9 +32,6 @@ public class ClassificationResult
     /// <summary>不可行原因（仅当 infeasible 时由AI输出）</summary>
     public string? InfeasibleReason { get; set; }
 
-    /// <summary>是否需要状态变更（搜索/拾取/移动等需要更新世界状态或获取道具时为true）</summary>
-    public bool NeedsStateChange { get; set; }
-
     /// <summary>是否为成人色情内容（跳过导演AI，直接叙事）</summary>
     public bool IsAdult { get; set; }
 

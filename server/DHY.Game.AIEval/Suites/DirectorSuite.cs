@@ -3,8 +3,9 @@ using DHY.Game.AIEval.Infrastructure;
 namespace DHY.Game.AIEval.Suites;
 
 /// <summary>
-/// 导演AI评测集：结构化输出完整性（种子/文风指导/对话四层/建议选项/分镜表）、
-/// hint纪律、成败一致性（judge层）。
+/// 前台导演AI评测集：结构化输出完整性（种子/文风指导/对话四层/分镜表）、
+/// 成败一致性（judge层）。状态记账字段（world_state_changes/item_hints/suggested_actions）
+/// 已拆给书记官，不再在此评测。
 /// </summary>
 public class DirectorSuite : EvalSuiteBase<DirectorCase>
 {
@@ -25,10 +26,8 @@ public class DirectorSuite : EvalSuiteBase<DirectorCase>
             NpcProfiles = c.Input.NpcProfiles,
             MainQuestProgress = c.Input.MainQuestProgress,
             PlayerInventory = c.Input.PlayerInventory,
-            IsRoutine = c.Input.IsRoutine,
             CharacterName = c.Input.CharacterName,
             JudgmentOutcome = c.Input.JudgmentOutcome,
-            NeedsStateChange = c.Input.NeedsStateChange,
             SideQuestList = c.Input.SideQuestList,
             HiddenContentList = c.Input.HiddenContentList
         };
@@ -82,14 +81,7 @@ public class DirectorSuite : EvalSuiteBase<DirectorCase>
                     output.Beats == null ? "无分镜" : $"{output.Beats.Count}段"));
         }
 
-        // 5. 建议行动选项纪律：恰好2个，文本≤15字
-        if (output.SuggestedActions is { Count: 2 } sa
-            && sa.All(a => !string.IsNullOrWhiteSpace(a.ActionText) && a.ActionText.Length <= 15))
-            result.Checks.Add(CheckResult.Ok("建议行动选项", $"[{string.Join(" | ", sa.Select(a => a.ActionText))}]"));
-        else
-            result.Checks.Add(CheckResult.Fail("建议行动选项", "恰好2个且各≤15字",
-                output.SuggestedActions == null ? "未输出" :
-                $"{output.SuggestedActions.Count}个: {string.Join(" | ", output.SuggestedActions.Select(a => $"{a.ActionText}({a.ActionText?.Length}字)"))}"));
+        // 5. 建议行动选项已拆给书记官（suggested_actions），前台导演不再检查
 
         // 6. NPC对话指导四层结构（期望对话的场景检查）
         if (e.ExpectDialogue == true)
@@ -102,37 +94,7 @@ public class DirectorSuite : EvalSuiteBase<DirectorCase>
                     output.NpcActions == null ? "无npc_actions" : $"{dialogues?.Count ?? 0}个"));
         }
 
-        // 7. 状态变更摘要必出（需要状态变更时）
-        if (c.Input.NeedsStateChange)
-        {
-            if (!string.IsNullOrWhiteSpace(output.WorldStateChanges?.Summary))
-                result.Checks.Add(CheckResult.Ok("状态变更摘要", "summary非空"));
-            else
-                result.Checks.Add(CheckResult.Fail("状态变更摘要", "summary非空", "缺失"));
-        }
-
-        // 8. hint纪律：期望包含/禁止的名称
-        var hintNames = output.ItemHints?.Select(h => h.Name).ToList() ?? new();
-        if (e.ExpectHintNames is { Count: > 0 })
-        {
-            var missing = e.ExpectHintNames
-                .Where(n => !hintNames.Any(h => h.Contains(n, StringComparison.OrdinalIgnoreCase)))
-                .ToList();
-            if (missing.Count == 0)
-                result.Checks.Add(CheckResult.Ok("关键资产hint", $"[{string.Join(",", hintNames)}]"));
-            else
-                result.Checks.Add(CheckResult.Fail("关键资产hint", $"含[{string.Join(",", e.ExpectHintNames)}]", $"实际[{string.Join(",", hintNames)}]"));
-        }
-        if (e.ForbidHintNames is { Count: > 0 })
-        {
-            var violated = e.ForbidHintNames
-                .Where(n => hintNames.Any(h => h.Contains(n, StringComparison.OrdinalIgnoreCase)))
-                .ToList();
-            if (violated.Count == 0)
-                result.Checks.Add(CheckResult.Ok("普通物品不hint", "无违规"));
-            else
-                result.Checks.Add(CheckResult.Fail("普通物品不hint", $"不含[{string.Join(",", e.ForbidHintNames)}]", $"违规[{string.Join(",", violated)}]"));
-        }
+        // 7/8. 状态变更摘要与hint纪律已拆给书记官（world_state_changes/item_hints），前台导演不再检查
 
         // 9. judge层：叙事种子与骰子成败一致性
         if (e.JudgmentSuccess.HasValue && options.EnableJudge)

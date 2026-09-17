@@ -1,3 +1,5 @@
+using DHY.Game.AI.Dtos;
+
 namespace DHY.Game.Hub.Dtos;
 
 #region 服务端→客户端 推送DTO
@@ -406,6 +408,13 @@ public class PlayerActionInput
 
     /// <summary>成人模式开关（前端玩家手动切换，开启后跳过分类AI直接走成人叙事）</summary>
     public bool IsAdultMode { get; set; }
+
+    /// <summary>
+    /// 行动粒度（仅服务端内部使用，前端不传）：
+    /// 缓存未命中的选项回退时由 ProcessSelectCachedActionAsync 填入 ActionScales.Advance，
+    /// 保证粗粒度推进选项仍让导演走章节档；玩家自由输入保持默认 detail。
+    /// </summary>
+    public string ActionScale { get; set; } = ActionScales.Detail;
 }
 
 /// <summary>

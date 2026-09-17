@@ -1,16 +1,25 @@
-# AI系统架构 v3.6.0
+# AI系统架构 v4.4.2
 
-> 版本：3.6.0 | 生效日期：2026-07-25 | 变更类型：资产账本健壮性加固——物资官记账失败按蓝图规则化保底落库；缓存选项路径补齐超重门卫；缓存过期/未命中以选项文本走常规全链路；账本随会话生命周期清理（重开软删/放弃硬删）
+> 版本：4.4.2 | 生效日期：2026-09-16 | 变更类型：**书记官选项接住导演引导线索 + 两侧提示词微瘦身**。`scribe_system.txt` 新增规则：`suggested_actions` 必须接住既定事实中的「引导线索」（导演 `narrative_hooks` 经 `BuildDirectorFacts` 拼入）——至少一个选项顺线索延伸，多条线索时两选项分别对应不同线索，禁止同跟一条；此前导演模板已按“抉择点时 hooks 是各选项的隐含暗示”设计，但书记官侧无对应规则，hooks 只以无约束的隐性路径影响选项。同批删除已废弃的 `director_system.txt`（含 bin 副本），导演模板删纯旁白行“这四层信息让叙事AI…”，书记官模板去三处重复（“未变化字段不输出”并入总规则、item_hints 字段清单与 schema 双写、schema 硬写 15 字与粗粒度档 20 字矛盾）
+>
+> 历史版本 4.4.1（2026-09-16）：前台导演提示词瘦身第二批——删 `[常规行动]` 规则及导演侧 `IsRoutine` 注入链；主线进度规则并入主动引导规则，改为响应 `[剧情推进提示]`；schema 与规则段去双写；新增支线/隐藏内容清单使用规则
+>
+> 历史版本 4.4.0（2026-09-16）：整链拆除 `needs_state_change`（分类AI判定与输出、三处 DTO 字段、`[无需状态变更]` 标记与规则、时段推进分类门控），`time_advance` 改为纯由导演判定
+>
+> 历史版本 4.3.0（2026-09-16）：书记官常规轮始终完整记账——移除纯叙事轮的 SuggestionsOnly 分流，SuggestionsOnly 仅保留给无导演蓝图的场景（开场轮/不可行短路）
+>
+> 历史版本 4.1.0（2026-09-13）：预计算深度下调到 L1（导演层）——就绪时刻 ~35s→~15s，点选后叙事实时流式生成、后台链 await 书记官回填再落库；新增两个延迟埋点；L1.5 列为备用方案
 
-## 五AI角色
+## 六AI角色
 
 ### 分类AI（Classifier）
 
 | 属性 | 值 |
 |------|------|
-| 职责 | 行动分类 + **可行性三态判定（唯一综合门卫）** + **行动意图提炼** + **技能判定**（DC/技能/优劣势） |
+| 职责 | 行动分类 + **可行性三态判定（唯一综合门卫）** + 成人内容判定 + **行动意图提炼** + **技能判定**（DC/技能/优劣势）；不再判定「是否需要状态变更」（v4.4.0 移除） |
+| **模型（v4.0.0）** | `deepseek-v4-flash`，**要求 `EnableThinking = false`**（轻量路由任务，思考链无实质收益却占关键路径） |
 | 输入上下文 | **局面快照(无历史)** + NPC档案 + **可用资产清单**（玩家背包 + 已知情报/线索账本，只读） |
-| 输出格式 | JSON `{is_routine, confidence, reason, feasibility, infeasible_reason, needs_state_change, is_adult, action_intent, judgment}` |
+| 输出格式 | JSON `{is_routine, confidence, reason, feasibility, infeasible_reason, is_adult, action_intent, judgment}` |
 
 **judgment 结构**（非常规行动且可行时输出）：
 ```json
@@ -24,21 +33,42 @@
 }
 ```
 
-### 导演AI（Director）
+### 前台导演AI（Director）
 
 | 属性 | 值 |
 |------|------|
-| 职责 | 推演世界反应，**基于判定结果**生成叙事种子+文风指导+对话层级 |
-| **模型（v3.2.0）** | **`qwen3.7-max`，`EnableThinking = false`**（延迟 3-6s；原 deepseek-v4-flash+思考 30-72s） |
-| 输入上下文 | 副本设定 + NPC档案 + **局面快照(含历史)** + 主线进度 + 玩家背包 + **[判定结果]** + **[行动意图+原始表达]** |
-| 输出格式 | 严格JSON（**narrative_seed**(250字文学场景速写) / **prose_guidance**(句式节奏+感官重点+文学手法) / **beat_scale**(节拍分档：micro/normal/chapter) / **beats**(章节档分镜表4-8个，含seed/beat_type/focus) / **narrative_word_target**(目标字数) / npc_actions(含**dialogue_direction**四层结构) / world_state_changes(结构化) / pacing / **item_hints**(物资清单权威蓝图，含is_key) / **suggested_actions**） |
+| 职责 | 推演世界反应，**基于判定结果**生成叙事种子+文风指导+对话层级；**只做创作与节奏决策，不产出任何状态账目** |
+| **模型（v4.0.0）** | `deepseek-v4-flash`，**要求 `EnableThinking = false`**（关键路径；输出 schema 砍半后解码耗时显著下降。`qwen3.7-max` 为备选，按实测质量定夺） |
+| 输入上下文 | 副本设定 + NPC档案 + **局面快照(含历史)** + 主线进度 + 支线/隐藏内容清单（埋线索素材） + 玩家背包 + **[判定结果]** + **[行动意图+原始表达]**；条件注入：`[角色再定位]`、`[剧情推进提示]`（代码层停滞检测命中）、`[推进型行动]`（点选粗粒度选项）。不再注入 `[常规行动]` 标记（v4.4.1 移除：它与掷骰无因果关系，“无[判定结果]则直接描述结果”已覆盖其语义） |
+| 输出格式 | 严格JSON（**narrative_seed**(250字文学场景速写) / **prose_guidance**(句式节奏+感官重点+文学手法) / **beat_scale**(节拍分档：micro/normal/chapter) / **beats**(章节档分镜表4-8个，含seed/beat_type/focus) / **narrative_word_target**(目标字数) / npc_actions(含**dialogue_direction**四层结构，**不含 attitude_change**) / pacing / narrative_hooks / player_choice_point / time_advance） |
+| 模板 | `director_front_system.txt`（v4.0.0 从 `director_system.txt` 拆出） |
+
+**关键变化（v4.0.0：前台/后台拆分）**：
+- `world_state_changes`（含 `quest_progress`）、`item_hints`、`npc_attitude_changes`、`suggested_actions` 四类状态账目**全部移交书记官AI**，与叙事流式并行产出
+- 前台导演的输出即**既定事实**：书记官只依此记账，**导演没写的事等于没发生**——故剧情涉及的状态后果必须在 `narrative_seed` 或 `npc_actions` 中明确体现
+- 输出 schema 减半（原 ~1965 token），直接缩短玩家等待的解码时间
 
 **关键变化（v3.0.0）**：
 - `narrative_direction`（100字事件概述）→ `narrative_seed`（250字文学性场景速写），从"剧情大纲"变为"小说家草稿"
 - 新增 `prose_guidance`：句式节奏+感官重点+文学手法，指导叙事AI的文风选择
 - `dialogue_gist`（字符串）→ `dialogue_direction`（四层结构：surface/subtext/conceal/body_language）
 - 移除 `sensory_hint`（职责合并到 prose_guidance）
-- `world_state_changes` 已从字符串数组升级为结构化对象（`WorldStateChangesDto`），所有字段 nullable，仅变化时输出
+- `world_state_changes` 从字符串数组升级为结构化对象（`WorldStateChangesDto`），所有字段 nullable，仅变化时输出（v4.0.0 起由书记官输出）
+
+### 书记官AI（Scribe）
+
+| 属性 | 值 |
+|------|------|
+| 职责 | **状态记账执行器**：依前台导演的既定事实，产出全部结构化状态字段（不参与创作、不改写剧情） |
+| 模型 | `deepseek-v4-flash`，`Temperature = 0.3`，**要求 `EnableThinking = false`** |
+| 时机 | **前台导演返回后，与叙事流式并行**（作为后台 `Task` 随 `GameActionResult.ScribeTask` 透传，Hub 在叙事播放期间 `await`） |
+| 触发门控 | **所有经过导演蓝图的常规轮一律走完整记账**（无分类门控）；仅**无导演蓝图的场景**（开场轮/不可行短路）走 SuggestionsOnly 轻量模式 |
+| 输入上下文 | 玩家行动+意图 + 判定结果 + **前台导演既定事实文本** + 局面快照 + NPC档案 + 玩家背包 + 主线进度 + 支线/隐藏内容清单 |
+| 输出格式 | JSON `{world_state_changes(含quest_progress), item_hints, npc_attitude_changes, suggested_actions}` |
+| 落库职责 | `WorldStateService.ApplyChangesAsync`（世界状态）+ `NpcService.UpdateAttitudeAsync`（NPC态度）；`item_hints` 交物资官、`suggested_actions` 交预计算 |
+| 轻量模式（SuggestionsOnly） | `ScribeInput.SuggestionsOnly = true` 时切换模板 `scribe_suggestions_system.txt`，只产出 `suggested_actions`（恰好2个）；`RunScribeTaskAsync` 内强制忽略 `world_state_changes`/`npc_attitude_changes` 不落库。**v4.3.0 起仅覆盖开场轮（首次进入·重新开始·重玩）与不可行短路**（无导演蓝图的场景），纯叙事轮已回归完整记账 |
+| 失败策略 | 失败**重试1次**；仍失败则**本轮状态不变、叙事不中断**，记 error 日志（Task 内自捕异常，永不抛给调用方） |
+| 纪律 | 只记录既定事实，不新增剧情、不改写导演结论 |
 
 ### 叙事AI（Narrative）
 
@@ -54,9 +84,10 @@
 
 | 属性 | 值 |
 |------|------|
-| 职责 | **纯记账员**：依导演蓝图 `item_hints` 逐条扩展出完整数值并落库，**资产账本的唯一写入权威** |
-| 时机 | **导演之后、叙事之前**（`RecordFromBlueprintAsync`，导演蓝图为事实基准，不读叙事正文） |
-| 触发门控 | 导演输出 `item_hints` 非空才调用（纯对话/观察轮零成本跳过） |
+| 职责 | **纯记账员**：依书记官蓝图 `item_hints` 逐条扩展出完整数值并落库，**资产账本的唯一写入权威** |
+| 时机（v4.0.0） | **书记官 `await` 完成后，与叙事流式并行**（`RecordFromBlueprintAsync`，书记官蓝图为事实基准，不读叙事正文） |
+| 记账链顺序 | 书记官记账 → 物资官记账 → 背包/情报推送 → 启动下一轮预计算（保证预计算的分类AI读到最新账本） |
+| 触发门控 | 书记官输出 `item_hints` 非空才调用（纯对话/观察轮零成本跳过） |
 | 落库路径 | 物理道具走 `InventoryService`（背包）；无形资产（情报/线索/承诺）走 `KnownAssetService`（已知情报账本） |
 | 输出格式 | JSON `LedgerDelta`：`{acquired_items, consumed_items, lost_items, acquired_info, invalidated_info}`，未变更分组省略 |
 | 纪律 | 逐条落实蓝图、补全合理数值（重量/加值/次数等），**不得新增蓝图外的道具** |
@@ -100,12 +131,16 @@
 ```
 玩家输入 → Classifier(分类+三态可行性门卫+意图提炼+技能判定)
          → 代码层掷骰(D20+调整值 vs DC+世界难度修正)
-         → Director(知成败，接收意图+原文，生成精准叙事方向+世界反应+item_hints)
-         → Quartermaster(依蓝图item_hints记账落库，背包/情报叙事前即刷新)
-         → [预计算(读最新账本) ‖ Narrative(流式叙事)]
+         → Director(知成败，接收意图+原文，生成叙事种子+世界反应+节奏决策)
+         → 【玩家等待在此结束，叙事开始流式推送】
+         → [ Narrative(流式叙事，玩家阅读中)
+           ‖ Scribe(记账) → Quartermaster(依 item_hints 落库) → 背包/情报推送 → 启动预计算(读最新账本) ]
 ```
 
-**信息流关键改进**：导演AI在做所有决策时已知道骰子结果，消除了旧架构中"导演蓝图可能暗示成功但骰子失败"的信息断层。**资产变更跟随导演蓝图**（导演是剧情权威、叙事仅扩写），记账在导演后、叙事前完成，下一轮门卫与预计算读账本即可见本轮变更。
+**信息流关键改进**：
+- 导演AI在做所有决策时已知道骰子结果，消除了旧架构中"导演蓝图可能暗示成功但骰子失败"的信息断层
+- **资产变更跟随书记官蓝图**（书记官依前台导演既定事实记账，叙事仅扩写）
+- **记账链整体移出关键路径**（v4.0.0）：书记官与物资官在玩家阅读叙事的时间窗口内完成，不再阻塞叙事首 token；因预计算在记账链尾启动，下一轮门卫与预计算仍能读到本轮变更
 
 ### 常规行动（快速路径）
 
@@ -220,93 +255,134 @@ chapter 档允许导演**主动制造大事件**（升级冲突 / 引入转折 /
 
 ### 问题背景
 
-每次玩家行动需经过 **分类AI → 骰子 → 导演AI → 叙事AI** 全链路。导演AI已升级为 qwen3.7-max（无思考，3-6s），分类 ~5s，叙事流式 20-45s（首 token ~10-15s），典型端到端等待 ≈ 15-25s。玩家浏览完叙事后需等待下一次行动的推演，体验较差。
+每次玩家行动需经过 **分类AI → 骰子 → 前台导演AI → 叙事AI** 全链路（v4.0.0 后记账链与叙事并行，不计入等待）。玩家浏览完叙事后仍需等待下一次行动的推演，体验较差。
 
 ### 核心思路
 
-导演AI每次推演结束后输出2个**建议行动选项**（`suggested_actions`），后台并行预计算这两个选项的完整AI流程结果并缓存。预计算触发点**提前到导演返回后**（与叙事流式并行），充分利用玩家阅读叙事的时间，避免玩家读完后仍需干等。玩家选择时：
-- **点选预计算选项** → 从缓存取结果直接展示（~1秒）
-- **输入自定义行动** → 丢弃缓存，走全链路（~15-25秒）
+**书记官AI**（v4.0.0 前为导演AI）每次记账时输出2个**建议行动选项**（`suggested_actions`），后台并行预计算这两个选项并缓存。预计算在**记账链尾启动**（仍在叙事流式期间），充分利用玩家阅读叙事的时间。
 
-### 分档预计算策略（v3.4.0）
+**预计算深度 = 导演层（L1，v4.1.0）**：预计算只跑到「分类AI → 骰子 → 前台导演AI」（DryRun），**不再预生成叙事正文**；书记官在 `ProcessPlayerActionAsync` 内 fire-and-forget 启动（`result.ScribeTask`），**保留句柄但不 await、不阻塞就绪**。就绪时刻从旧方案的「导演+叙事(~35s)」降到「导演(~15s)」，使下一轮选项在玩家读完本轮叙事时即已就绪（零等待）。玩家选择时：
+- **点选预计算选项** → 秒推骰子结果 → **实时流式生成叙事**（`StreamNarrativeLiveAsync`）‖ 后台链 `await` 书记官回填后落库记账
+- **输入自定义行动** → 丢弃缓存，走全链路
 
-叙事文本的预计算方式**按 `beat_scale` 分治**，在「点选秒开」与「预计算成本」间取平衡：
+> **为何砍到导演层**：`NarrativeInput` 由前台导演产出、是叙事AI的必需输入，故导演层是「最小有用预计算深度」。再往下预生成叙事（旧 L3）虽能点选秒回放，但就绪晚 ~20s、且未选选项白烧整段叙事调用；砍到导演层后就绪达标，叙事延迟改由「点选后实时流式 + 玩家阅读」掩盖。
 
-| 分档 | 预计算内容 | 点选后行为 | 未选选项浪费 |
-|------|------------|------------|--------------|
-| `micro` / `normal` | 一次性预生成**完整正文** | 秒回放缓存（~1s） | 1 次叙事调用 |
-| `chapter` | 仅预取**前 N 段**（`ChapterPrefetchBeats`，默认1） | 秒回放前缀 → 从断点**实时分段续写** | 仅 N 次叙事调用（而非整章 4-8 次） |
+> **纯叙事轮也走完整记账（v4.3.0）**：书记官始终接收完整上下文并产出全部结构化字段，不设分类门控。若本轮确实无状态变化，书记官自然输出仅含 `summary` 的空 `world_state_changes`（只追加 change_history）；若存在信息获取类行动（查看新短信/阅读新文件），书记官可正确记录知识状态变更，避免叙事层与世界状态层脱节。
 
-**章节档「预取首段 + 边读边续生成」原理**：章节档整章为 4-8 次串行叙事调用（详见「节拍分段生成」章）。若整章预生成，未选选项会白烧 4-8 次调用、且长文伪流式回放体验差。改为只预取前 N 段：玩家点选后**秒见首段**（缓存前缀），其余分镜在**玩家阅读首段的时间里**实时续写。由于「读一段（~40s）」慢于「生成一段（~15-25s）」，续写始终领先阅读指针，玩家几乎无感等待——既保住秒开，又把白烧从 4-8 次砍到 N 次。预取段数不足以覆盖卡顿时可调高 `ChapterPrefetchBeats`。
+### 预计算深度演进（L3 → L1）
 
-### 时序图
+预计算「算到哪一层」历经三档，v4.1.0 定为 **L1（导演层）**：
+
+| 档位 | 预计算深度 | 就绪时刻 | 点选后行为 | 未选选项浪费 |
+|------|-----------|----------|-----------|--------------|
+| L3（≤v3.6.0） | 导演 + **叙事全文** | ~35s | 秒回放缓存正文 | 整段叙事调用（章节档 4-8 次） |
+| L2（备选） | 导演 + **书记官** | ~25s | 实时叙事 | 书记官 + 叙事 |
+| **L1（v4.1.0）** | **仅导演层** | **~15s** | 实时流式叙事 + 后台 await 书记官 | 书记官（fire-and-forget 预跑，远小于叙事） |
+
+**为何 L1 而非 L3/L2**：玩家零等待的条件是「下一轮选项就绪时刻 ≤ 玩家读完本轮叙事并想点的时刻」。预计算启动被「本轮记账完成」卡在 T≈28s（硬约束：下一轮分类AI门卫须读到本轮最新账本），故只能压缩**预计算深度**。L3 就绪 T≈63s、L2 T≈53s 均晚于玩家读完时刻（T≈35-45s），仍要干等；唯有 L1（导演完成即就绪，T≈43s）能贴上阅读节奏。
+
+**章节档统一实时流式**：L1 下预计算不再产出任何叙事正文，`micro`/`normal`/`chapter` 三档**点选后一律走 `StreamNarrativeLiveAsync` 实时流式**（章节档内部仍按 `beats` 逐分镜续写，详见「章节档分段生成」）。旧 L3 的「章节档预取前 N 段 + 断点续写」机制（`ChapterPrefetchBeats` / `StreamChapterContinuationAsync` / `PrecomputedActionCache.NextBeatIndex`）**在 L1 下不再被点选路径调用——保留代码但不启用**。
+
+### 时序图（L1）
 
 ```
 玩家输入行动A
-  → 分类AI(~5s) → 骰子 → 导演AI(qwen3.7-max, ~3-6s)
-  → 导演返回后：若有 item_hints → 物资官记账落库 → 推送背包/情报更新（叙事前即刷新）
-  → 记账完成后：
-      ├─→ 主线：叙事AI(流式 20-45s) → 推送叙事文本
-      └─→ 副线：Task.Run 启动预计算 (与流式并行，其分类AI门卫读到本轮最新账本):
-              Task1: 选项1 → 分类AI→骰子→导演AI→叙事AI → 缓存结果1
-              Task2: 选项2 → 分类AI→骰子→导演AI→叙事AI → 缓存结果2
-  → 叙事流式完成，推送行动选项 [选项1] [选项2]
+  → 分类AI(思考OFF) → 骰子 → 前台导演AI(思考OFF，输出砍半)
+  → 导演返回即开始叙事：
+      ├─→ 主线：叙事AI(流式) → 推送叙事文本（玩家开始阅读）
+      └─→ 副线：Task.Run 记账链（与流式并行）:
+              await 书记官Task → 世界状态/NPC态度落库、回填 item_hints/suggested_actions
+              → 若有 item_hints → 物资官记账落库 → 推送背包/情报更新
+              → 启动预计算（分类AI门卫读到本轮最新账本）:
+                    Task1: 选项1 → 分类AI→骰子→导演AI(DryRun) → 缓存结果1（书记官 fire-and-forget，不 await）
+                    Task2: 选项2 → 分类AI→骰子→导演AI(DryRun) → 缓存结果2（书记官 fire-and-forget，不 await）
+                    ※ 就绪 = 导演完成（~15s），不等叙事、不等书记官
+  → 叙事流式完成，推送行动选项 [选项1] [选项2] + MarkOptionsShown(埋点①记时刻)
       若预计算已完成 → 按钮直接可点；否则先显示"加载中"，等完成后再切换为可点击
-  → 玩家点击 [选项1] → 缓存命中 → 立即推送结果（~1秒）
+  → 玩家点击 [选项1]（埋点①算思考间隔）→ 缓存命中:
+      ├─→ 秒推骰子结果
+      ├─→ 主线：StreamNarrativeLiveAsync 实时流式叙事（埋点②记首token延迟）
+      └─→ 副线：Task.Run 后台链（与流式并行）:
+              await result.ScribeTask（回填 ScribeOutput/ItemHints/SuggestedActions，预跑大概率已完成）
+              → ApplyCachedActionResultAsync 落库（世界状态/NPC态度/时段/交互计数，依赖 ScribeOutput）
+              → 物资官记账 → 推送背包/情报 → 启动下一轮预计算
+      叙事流完 → await 后台链 → 落库后读 session/character → 写叙事日志 → 推状态/选择点/时段/支线 → 推下一轮选项
   → 或输入自定义文本 → 丢弃缓存 → 走全链路
 ```
 
-注：预计算 DryRun 内部不落库（不触发记账），其分类AI门卫与真实行动一视同仁地只读账本做三态判定；因记账已在预计算启动前完成，预计算读到的永远是含本轮变更的最新账本（根治"上轮获得的道具下轮选项被误判不可行"的死按钮问题）。
+注：预计算 DryRun 内部不落库；书记官**不再在预计算阶段 await**（fire-and-forget 预跑，`ScribeTask` 句柄随缓存存活到点选）。点选路径在后台链**链首** `await result.ScribeTask` 回填状态字段后，才调 `ApplyCachedActionResultAsync` 落库（该方法依赖 `ScribeOutput`）。`RunScribeTaskAsync` 自建独立 DI scope 且自捕异常，句柄可安全跨请求存活。分类AI门卫与真实行动一视同仁地只读账本做三态判定；因记账已在预计算启动前完成，预计算读到的永远是含本轮变更的最新账本（根治"上轮获得的道具下轮选项被误判不可行"的死按钮问题）。
 
 ### DryRun模式
 
 `ProcessActionInput` 新增 `DryRun` 布尔标志。`DryRun=true` 时：
-- AI管线正常运行（分类、骰子、导演、叙事全部执行）
-- **跳过所有数据库写入**：骰子记录、装备耐久扣除、世界状态变更、道具获取/消耗、NPC态度更新、时段推进、交互计数、紧张度
-- 返回完整的 `GameActionResult`（含 NarrativeInput、DiceResult、StateChanges 等）
+- AI管线运行到**导演层**（分类、骰子、前台导演执行）；书记官 fire-and-forget 启动（`result.ScribeTask`）但**预计算不 await**；**叙事不生成**（L1 下改由点选后实时流式）
+- **跳过所有数据库写入**：骰子记录、装备耐久扣除、世界状态变更、道具获取/消耗、NPC态度更新、时段推进、交互计数、紧张度（书记官输出仅回填到结果对象，不调 `ApplyChangesAsync`）
+- 返回 `GameActionResult`（含 NarrativeInput、DiceResult、StateChanges、**ScribeTask 句柄**；ScribeOutput/ItemHints/SuggestedActions 待点选时 await 书记官后回填）
 - `SkillCheckAsync` 新增 `dryRun` 参数，DryRun时计算骰子结果但不写DB、不扣装备耐久
 
 ### 缓存结构
 
-使用 `ConcurrentDictionary` 做内存缓存（每个sessionId仅一个活跃玩家，无需分布式）：
+使用 `ConcurrentDictionary` 做内存缓存（每个sessionId仅一个活跃玩家，无需分布式），TTL = 1 天（v4.2.0 由 1 小时延长，覆盖跨日挂起恢复）：
 
 ```csharp
 public class PrecomputedActionCache
 {
     public string ActionText { get; set; }        // 行动文本
     public string Hint { get; set; }              // 方向提示
-    public GameActionResult? Result { get; set; } // 预计算结果
-    public string NarrativeText { get; set; }     // 非章节档=完整正文；章节档=已预取前 N 段前缀
-    public int NextBeatIndex { get; set; }        // -1=非章节档（直接回放）；>=0=章节档，从该索引起实时续写
-    public DateTime CreatedAt { get; set; }       // 创建时间（5分钟TTL）
+    public GameActionResult? Result { get; set; } // 预计算结果（L1：含 NarrativeInput + ScribeTask 句柄）
+    public bool IsFeasible { get; set; }          // 是否可行（不可行短路时=false，点选置灰）
+    public string NarrativeText { get; set; }     // 【L1 废弃】恒为 ""（叙事改点选后实时流式）
+    public int NextBeatIndex { get; set; }        // 【L1 废弃】恒为 -1（章节档统一实时流式）
+    public DateTime CreatedAt { get; set; }       // 创建时间（1天TTL）
+}
+
+public class SessionActionCache
+{
+    public long SessionId { get; set; }
+    public List<PrecomputedActionCache> Options { get; set; } // 恰好2个
+    public bool IsReady { get; set; }              // 预计算是否全部完成（导演层就绪）
+    public DateTime OptionsShownAt { get; set; }   // 埋点①：选项推送给前端的时刻
 }
 ```
 
-### 缓存命中回放逻辑
+### 缓存命中回放逻辑（L1）
 
-玩家点选缓存选项后，Hub执行 `SelectCachedAction`：
-0. **背包超重门卫**：与常规行动路径一致，负重 ≥100% 直接阻断（缓存路径不豁免）
-1. 推送骰子结果（如有）
-2. 持久化到数据库（**回放前**）：通过 `ApplyCachedActionResultAsync` 写入世界状态、时段、NPC态度、交互计数
-3. **记账落库**：缓存结果含导演 `item_hints`（预计算 DryRun 未落库），提交时由物资官依蓝图记账 → 推送背包/情报更新
-4. 失效旧缓存并**启动下一轮预计算**（读最新账本，与随后叙事回放并行）
-5. 流式推送叙事文本，**按 `NextBeatIndex` 分流**，回放完成后写入叙事日志（完整正文=前缀+续写）：
-   - `NextBeatIndex < 0`（非章节档）：按句末标点分块回放完整正文（模拟流式）
-   - `NextBeatIndex >= 0`（章节档）：先回放已预取前缀（保留段落）→ 调 `StreamChapterContinuationAsync` 从该索引起实时流式续写剩余分镜，首个 chunk 为分隔空行与前缀无缝衔接
-6. 推送游戏状态更新、支线任务
-7. 推送 `IsChoicePoint`（如导演AI标记为关键抉择）与下一轮建议选项
+玩家点选缓存选项后，Hub执行 `SelectCachedAction`（`ProcessSelectCachedActionAsync`）：
+0. **埋点①思考间隔**：入口读 `GetOptionsShownAt`，日志记录「点击时刻 − 选项推送时刻」(ms)（须在 `InvalidateCache` 前读）
+1. **背包超重门卫**：与常规行动路径一致，负重 ≥100% 直接阻断（缓存路径不豁免）
+2. 秒推骰子结果（如有）→ 尽早失效旧缓存（防重入）
+3. **叙事实时流式（主线）**：`NarrativeInput != null` 时调 `StreamNarrativeLiveAsync` 实时生成并流式推送（埋点②记首 token 延迟）；不可行短路（`NarrativeInput == null`）时回放拒绝文案
+4. **后台链（副线，`Task.Run` 与叙事并行）**：
+   - 链首 `await result.ScribeTask` → 回填 `ScribeOutput`/`ItemHints`/`SuggestedActions`/`QuestProgress`
+   - `ApplyCachedActionResultAsync` 落库（世界状态/NPC态度/时段/交互计数，依赖 `ScribeOutput`）
+   - 若有 `item_hints` → 物资官依蓝图记账 → 推送背包/情报更新
+   - 启动下一轮预计算（读最新账本）
+5. 叙事流完 → `await` 后台链收尾 → **落库后**读 `session`/`character` → 写叙事日志（用落库后 `InteractionCount`）→ 构建下一轮选项 DTO（此时 `SuggestedActions` 已回填）
+6. 推送游戏状态、`IsChoicePoint`、时段变化、支线任务 → 恢复输入
+7. 推送下一轮建议选项 + `MarkOptionsShown`（埋点①记时刻）；若预计算已跑完则按钮直接可点，否则显示加载态
 
-**缓存过期/未命中回退**：前端点击选项时随请求携带选项文本（`SelectCachedActionInput.ActionText`）。缓存过期（1小时TTL）或未命中时，直接以该文本作为玩家输入走 `ProcessPlayerActionAsync` 常规全链路（等同手动输入，保留成人模式开关状态），不再使用占位行动；文本不可得（旧客户端）时提示“该行动选项已过期，请直接输入你的行动”。
+**缓存过期/未命中回退**：前端点击选项时随请求携带选项文本（`SelectCachedActionInput.ActionText`）。缓存过期（1天TTL）或未命中时，直接以该文本作为玩家输入走 `ProcessPlayerActionAsync` 常规全链路（等同手动输入，保留成人模式开关状态），不再使用占位行动；文本不可得（旧客户端）时提示“该行动选项已过期，请直接输入你的行动”。
 
 > **段落保留修复**：缓存回放的分块器 `SplitNarrativeToChunks` 早期会 `Trim()` 掉 `\n\n`，导致章节档前缀回放时段落塌成一堵墙。已改为仅去除水平空白（空格/制表符）、不再按 `\n` 拆分，保留段落分隔（非章节档回放同样受益）。
 
-### NeedsStateChange 守卫
+### 挂起/断线恢复：选项持久化与分层降级（v4.2.0）
 
-`ApplyCachedActionResultAsync` 中的持久化操作受 `GameActionResult.NeedsStateChange` 守卫保护（与正常流程一致）。当分类AI判定为「常规行动」时，世界状态/道具/NPC态度/交互计数均跳过，避免错误写入。
+内存预计算缓存在服务重启或 TTL 过期后丢失，且挂起副本（`Status = 4`）不清缓存。为使玩家恢复副本时仍能续上「离开前最后一轮」的行动选项，新增持久化字段与分层降级：
 
-### 导演AI输出扩展
+- **持久化字段**：`GameDungeonSession.LastSuggestedActions`（`nvarchar(max)`，存最后一轮 2 个选项的 JSON）。常规轮/点选轮/开场轮在启动预计算前写入；放弃会话（`Status = 2`）与重新开始置空。
+- **恢复跳过回归旁白（方案A）**：恢复副本时不再推送硬编码回归旁白，直接续上离开前最后一轮叙事；历史叙事由前端 `Lobby.resumeDungeon` 从 `checkActiveSession` HTTP 接口预先恢复（`BuildResumedResult` 的 `resumeNarrative` 置空）。
+- **分层降级**（`CheckActiveSessionAsync` 第8步 + `ProcessSelectDungeonAsync` 步骤8）：
+  - `ActiveSessionCheckOutput.SuggestedActions` 携带 DB 中的选项文本（不含可行性）；Hub 在 `DungeonReady` 后以文本推送（`IsComputing = false`、`IsFeasible` 默认 true），**不重跑预计算**（省 token）。
+  - 玩家点选后由 `ProcessSelectCachedActionAsync` 自动分流：内存缓存命中（1天TTL内）→ 秒响应；未命中 → 以 `ActionText` 走常规全链路。
+- **跨层依赖约束**：`DHY.Game.Core` 不引用 `DHY.Game.AI`，故 `CheckActiveSessionAsync`（Core 层）只读 DB 文本选项、不查内存缓存；可行性分流交由 Hub 层的 `ProcessSelectCachedActionAsync` 处理。
 
-导演AI每次推演必须输出 `suggested_actions`（恰好2个）：
+### 缓存回放持久化无分类门控
+
+`ApplyCachedActionResultAsync` 的持久化不再受分类AI判定守卫（v4.3.0 移除门控，v4.4.0 删除 `GameActionResult.NeedsStateChange` 死字段）：书记官输出了 `WorldStateChanges` 就落库，时段推进由 `StateChanges.TimeAdvanced` 守卫，交互计数/紧张度每轮必更新。
+
+### 书记官输出扩展
+
+书记官每次记账必须输出 `suggested_actions`（恰好2个）：
 
 ```json
 "suggested_actions": [
@@ -315,7 +391,26 @@ public class PrecomputedActionCache
 ]
 ```
 
-规则：每次推演必须输出恰好2个行动建议，方向应有差异性，文本简洁（15字内）。
+规则：每次记账必须输出恰好2个行动建议，方向应有差异性，文本简洁（15字内）。v4.3.0 起所有常规轮（含纯叙事轮）均走完整记账，书记官在产出选项的同时如实记录状态变更（无变化时仅输出 summary）。
+
+### 全场景行动选项覆盖（v4.2.0 引入，v4.3.0 收窄）
+
+为达成「每一轮都有行动选项」的 UX 一致性：
+- **常规轮（含纯叙事轮）**：v4.3.0 起始终走完整书记官，自然产出 `suggested_actions` + 状态记账，不再使用 SuggestionsOnly。
+- **无导演蓝图的场景**仍走 SuggestionsOnly 轻量模式（`ScribeInput.SuggestionsOnly = true`，模板 `scribe_suggestions_system.txt`），只产出 `suggested_actions`（恰好2个）、**不记账不落库**：
+
+| 场景 | 既定事实（DirectorFacts）来源 | 接入点 |
+|------|------------------------------|--------|
+| 首次进入 / 同题异卷重玩 | 开场叙事 | `ProcessSelectDungeonAsync` 步骤9（`!IsResumed`） |
+| 重新开始 | 开场叙事 | `ProcessRestartSessionAsync`（`DungeonReady` 后） |
+| 不可行短路（`infeasible`） | 拒绝叙事 | `AiCoordinatorService` 短路分支塞 `ScribeTask` |
+
+- **开场类场景**通过 `GenerateSuggestionsOnlyAsync(sessionId, playerAction, directorFacts, characterName)` 生成（自建 scope 调 `ScribeAsync`，失败返回 null 降级、不阻断副本启动）；装配由 `BuildSuggestionsOnlyInputAsync` 完成：以开场叙事为 `[本轮既定事实]`，保留主线目标引导选项朝主线推进，不暴露支线/隐藏内容避免剧透。生成后与常规轮一致：持久化 `LastSuggestedActions` + 启动预计算 + 推送选项。
+- **不可行短路**复用 `RunScribeTaskAsync`（已有 `result` 对象），以拒绝叙事为既定事实产出「补救方向」选项；仅真实行动（`!DryRun`）时生成，预计算 DryRun 只关心可行性判定无需补救选项。
+
+**刻意无选项的场景**（设计接受，不补）：成人轮（`IsAdult`）、背包超载（≥100% 入口阻断）、缓存未命中且选项文本不可得（旧客户端）、副本结束态（完成/放弃/死亡）。
+
+至此，除上述刻意场景外，**全场景每轮均产出2个行动选项**。
 
 ### 前端交互
 
@@ -332,11 +427,33 @@ public class PrecomputedActionCache
 
 ### 风险与注意事项
 
-1. **AI调用成本**：每次行动额外增加2倍AI调用（2选项 × 分类+导演+叙事）。**章节档专项优化**：章节档只预取 N 段（默认1）而非整章，将单选项叙事预计算从 4-8 次降到 N 次，两选项最多白烧从 16 次降到 2N 次
+1. **AI调用成本（L1）**：每次行动额外增加 2 选项 ×（分类 + 骰子 + 导演 + **书记官 fire-and-forget**）。叙事**不再预生成**（改点选后实时流式，只算被选中的那条），故相比旧 L3 省掉了 2 选项的叙事白烧；代价是未选选项的书记官 token 被浪费（方向 B，远小于叙事）
 2. **缓存一致性**：预计算期间玩家输入已禁用，不存在状态漂移风险
-3. **缓存过期**：1小时TTL，过期后点选选项走常规流程
+3. **缓存过期**：1天TTL（v4.2.0 由 1 小时延长），过期后点选选项以文本走常规全链路；挂起/断线恢复另有持久化兜底（详见「挂起/断线恢复选项持久化」）
 4. **异常降级**：预计算失败时不影响正常游戏流程，按钮保持禁用，玩家可手动输入
-5. **章节档续写卡顿**：若某分镜特别短、或玩家读得快，可能出现短暂等待；可调高 `ChapterPrefetchBeats`（例如 2）换取更厚的阅读缓冲
+5. **书记官句柄跨请求存活**：预计算 fire-and-forget 启动的 `ScribeTask` 随缓存存活到点选，`RunScribeTaskAsync` 自建独立 DI scope + 自捕异常，不依赖预计算请求的 scope 生命周期
+6. **点选后叙事延迟**：L1 下叙事改实时流式，首 token 延迟（埋点②）成为点选后的可感知等待；若实测偏大，评估 L1.5 备用方案
+
+### 延迟埋点（v4.1.0）
+
+为评估 L1 实效、并决定是否启用 L1.5，新增两个 `LogInformation` 埋点：
+
+| 埋点 | 位置 | 记录内容 | 用途 |
+|------|------|----------|------|
+| ①玩家思考间隔 | 推送选项时 `MarkOptionsShown` 记 `OptionsShownAt`；点选入口 `GetOptionsShownAt` 算差值 | 「点击时刻 − 选项推送时刻」(ms) | 判断玩家读完叙事后是否仍需干等（间隔过短=选项未就绪即在等） |
+| ②叙事首 token 延迟 | `StreamNarrativeLiveAsync` 首个 chunk | 「流式开始 → 首 token」(ms) + sessionId | L1 下点选后的可感知等待；评估 L1.5 收益 |
+
+### L1.5 备用方案（暂不实施，留档）
+
+**设想**：预计算在导演层就绪后，继续把被缓存选项送入叙事AI，**叙事首 token 出现即开放点选**；玩家点选后直接接管已缓冲的叙事流，同时启动书记官路径。
+
+**物理事实**：C 选项叙事首 token 时刻 = C 导演完成 + 叙事首 token 延迟（~3s），预生成**不能让首字更早**，只能让它「点时已好」。
+
+**收益/代价评估**：
+- 收益上限 ≈ 叙事首 token 延迟（~3s），且**仅在玩家慢点**（读完 A 叙事时 C 首 token 尚未自然到达）时兑现；玩家快点时反而要等 C 首 token（就绪晚 ~3s）
+- 代价：退回叙事预生成的 token 浪费 + 缓冲流接管的复杂度（已缓冲 chunk 重放、与实时流拼接）
+
+**触发条件**：埋点数据显示「玩家思考间隔普遍偏长（慢点） **且** 叙事首 token 延迟明显 > 3-5s」时，再评估实施。当前先跑 L1 收集数据。
 
 ---
 
@@ -344,15 +461,36 @@ public class PrecomputedActionCache
 
 1. **分类AI承担裁判职责** — 技能判定（DC/技能/优劣势）由分类AI输出，代码层掷骰，导演AI不再参与判定参数设定
 2. **行动意图提炼稳定推演** — 分类AI将玩家变化多端的输入（口语/行动/混合）提炼为标准化意图（格式：`行动类别·动词：目标描述`），导演AI以意图为推演锡点同时保留原文供NPC对话反应
-3. **导演AI知成败后推演** — 骰子结果在导演AI之前确定，导演的所有输出（NarrativeDirection/NPC行为/WorldStateChanges）基于实际成败精准生成
-4. **常规行动跳过导演AI** — 减少延迟，日常行动无需世界推演
-5. **单一导演AI + 结构化JSON输出** — 确保输出可解析、可验证
-6. **NPC档案卡仅限核心NPC** — 避免资源浪费
-7. **接受1-2秒延迟 + 流式输出** — 用户体验可接受
-8. **100万token上下文窗口，不主动压缩历史** — 最大化叙事一致性
-9. **局面快照统一世界状态** — 分类AI和导演AI共用结构化快照，分类AI读当前状态（无历史），导演AI读全量（含 change_history）
-10. **导演蓝图是资产变更的唯一来源** — 导演是剧情权威、叙事仅扩写；物资官依蓝图 `item_hints` 记账，不读叙事正文；无 hint 即无需记账（零成本门控）
-11. **单门卫原则** — 分类AI是唯一综合门卫（只读账本 + 三态可行性 + 普通资源放过），预计算与真实行动一视同仁
+3. **导演AI知成败后推演** — 骰子结果在导演AI之前确定，导演的所有输出（narrative_seed/NPC行为/节奏决策）基于实际成败精准生成
+4. **常规行动跳过掷骰，不跳过导演** — `is_routine=true` 仅使分类AI不输出 judgment（从而无掷骰），行动仍走完整导演→叙事‖书记官链路；导演侧不再接收该标记（v4.4.1）
+5. **导演拆分为前台创作 + 后台记账**（v4.0.0） — 按**消费者**拆分而非按内容领域：叙事AI只消费前台字段，故前台导演只产出创作字段置于关键路径（输出砍半），状态账目交给与叙事并行的书记官；子导演按“NPC/文笔”等领域拆分的方案已否决（子导演仍堵关键路径）
+6. **书记官失败不阻断叙事** — 重试1次后仍失败则本轮状态不变、叙事照常推送（玩家体验优先于账目完整，异常记 error 日志）
+7. **常规轮始终完整记账（v4.3.0）** — 书记官不设分类门控，始终走完整模式（接收全量上下文、产出全部结构化字段）。纯叙事轮若确实无变化，书记官自然输出仅含 summary 的空变更（只追加 change_history）；信息获取类行动（查看新短信/阅读新文件）可被正确记账，根治叙事-状态脱节。SuggestionsOnly 仅保留给无导演蓝图的场景（开场轮/不可行短路）
+8. **结构化JSON输出** — 确保输出可解析、可验证
+9. **NPC档案卡仅限核心NPC** — 避免资源浪费
+10. **100万token上下文窗口，不主动压缩历史** — 最大化叙事一致性
+11. **局面快照统一世界状态** — 分类AI和导演AI共用结构化快照，分类AI读当前状态（无历史），导演AI读全量（含 change_history）
+12. **书记官蓝图是资产变更的唯一来源** — 书记官依前台导演既定事实记账、叙事仅扩写；物资官依 `item_hints` 落库，不读叙事正文；无 hint 即无需记账（零成本门控）
+13. **单门卫原则** — 分类AI是唯一综合门卫（只读账本 + 三态可行性 + 普通资源放过），预计算与真实行动一视同仁
+
+## 关键路径与并行化（延迟治理）
+
+玩家可感知的等待 = **分类AI + 掷骰 + 前台导演AI + 叙事首 token**，其余环节均应移出关键路径：
+
+| 环节 | 是否在关键路径 | 说明 |
+|------|----------------|------|
+| 分类AI | 是 | 思考 OFF，轻量路由 |
+| 掷骰（代码） | 是 | 毫秒级 |
+| 前台导演AI | 是 | 思考 OFF + 输出砍半，本阶段优化重点 |
+| 时段推进（代码） | 是 | 仅 DB 更新，毫秒级，留在前台 |
+| 书记官AI | 否 | 与叙事流式并行，Hub 在播放期间 `await` |
+| 物资官AI | 否 | 接在书记官之后，同为并行记账链 |
+| 预计算 | 否 | 记账链尾启动，读最新账本；L1 只算到导演层（不等叙事/书记官） |
+
+并行安全约束：
+- 书记官 Task 使用**独立 DI scope**（`IServiceScopeFactory`），不依赖调用方 scope 生命周期
+- Task 内部**自捕异常**，永不抛给调用方；Hub 读 `ItemHints`/`SuggestedActions`/`StateChanges` 前**必须 `await ScribeTask`**（await 的 happens-before 保证回填可见）
+- 世界状态落库沿用**递增前捕获的轮次**（`applyRound`），与交互计数递增解耦
 
 ## 判定信息流详解
 
@@ -362,7 +500,8 @@ public class PrecomputedActionCache
 |------|--------|------|
 | 三态可行性门卫 + 是否需要检定 + 技能 + DC + 优劣势 | 分类AI | `feasibility` + `judgment` JSON |
 | D20掷骰 + 调整值计算 + DC比较 | 代码层（规则引擎） | `GameDiceRollRecord` |
-| 基于成败的叙事方向 + 世界反应 + 物资清单 | 导演AI | `DirectorOutput`（含 `item_hints`） |
+| 基于成败的叙事种子 + 世界反应 + 节奏决策 | 前台导演AI | `DirectorOutput`（无状态字段） |
+| 依既定事实产出状态账目 + 物资清单 + 建议选项 | 书记官AI | `ScribeOutput` |
 | 依蓝图记账落库（背包/已知情报） | 道具AI（物资官） | `LedgerDelta` |
 | 将蓝图转化为沉浸文本 | 叙事AI | 流式文本 |
 
@@ -387,15 +526,21 @@ public class PrecomputedActionCache
 
 ### 模型配置
 
-四角色模型与思考模式**独立配置**（`GameAiOptions.Models`），按职责差异化选型：
+六角色模型与思考模式**独立配置**（`GameAiOptions.Models`），按职责差异化选型：
 
-| 角色 | 模型 | 思考模式 | 选型理由 |
-|------|------|----------|----------|
-| **Director** | `qwen3.7-max` | **false** | 输出为结构化 JSON 规划（非深度推理链）；Intelligence Index 46，基线能力足以替代思考链；解码速率 203 tok/s，比 Flash 快 3.5×；原生中文训练强化潜台词/隐瞒的多层对话设计 |
-| **Narrative** | `deepseek-v4-flash` | true | 真·文学创作场景，思考链有实质收益；流式推送下延迟被玩家阅读掩盖 |
-| **Classifier** | `deepseek-v4-flash` | true | 轻量路由任务，5s 内完成，无需换贵模型 |
-| **Architect** | `qwen3.7-max` | true | 一次性生成完整副本（耗时 120-150s 可接受），强规划能力有真实收益 |
+| 角色 | 模型 | 温度 | 思考模式（要求值） | 选型理由 |
+|------|------|------|----------|----------|
+| **Classifier** | `deepseek-v4-flash` | 0.85 | **false** | 轻量路由任务且处在关键路径，思考链无实质收益 |
+| **Director**（前台） | `deepseek-v4-flash` | 0.7 | **false** | 关键路径上唯一的 LLM 大头；输出 schema 砍半后解码耗时大幅下降（`qwen3.7-max` 为备选，按实测质量定夺） |
+| **Scribe** | `deepseek-v4-flash` | 0.3 | **false** | 纯结构化记账，低温保精确（任务名需精确匹配）；与叙事并行，延迟被阅读掩盖 |
+| **Quartermaster** | `deepseek-v4-flash` | 0.3 | **false** | 纯记账数值补全，无需创作与推理 |
+| **Narrative** | `deepseek-v4-flash` | 0.85 | true | 真·文学创作场景，思考链有实质收益；流式推送下延迟被玩家阅读掩盖 |
+| **Architect** | `qwen3.7-max` | 0.8 | true | 一次性生成完整副本（耗时 120-150s 可接受），强规划能力有真实收益 |
+| **AdultNarrative** | `grok-4-latest`（Poixe） | 0.85 | true | 成人叙事专用通道 |
 
+- 思考模式取舍原则：**关键路径上的角色一律关思考**，仅叙事/建筑师等“延迟可被掩盖或离线”的角色保留思考链
+- 缺少配置节点时 `AiModelFactory` 回退为 `qwen-plus` + 思考 ON，**新增角色必须同步补配置**（否则静默跑成高延迟路径）
+- ⚠️ `GameAiOptions.json` 位于 `DHY.FrameWork.Application/Configuration/`，**不入 Git**（各环境各自维护）且可由后台「AI模型配置」在线改写——上表为**架构要求值**，做延迟实测前必须先核对目标环境的实际配置
 - MaxTokens / ThinkingBudget 由服务端自主决定
 - **不接受客户端配置**
 
@@ -408,7 +553,7 @@ public class PrecomputedActionCache
 ### 上下文策略
 
 - 100万token窗口，不压缩历史
-- Game AI全角色默认启用思考模式（**导演例外：qwen3.7-max 关闭思考模式**，其基线 Intelligence Index 46 已强于 Flash+思考，且解码速率快 3.5×）
+- **思考模式按角色配置**（v4.0.0）：关键路径角色（分类/前台导演/书记官/物资官）关思考，叙事与建筑师保留思考链（详见「模型配置」）
 
 ## NPC语言一致性
 
@@ -454,12 +599,12 @@ public class PrecomputedActionCache
 ### 执行顺序
 
 1. **先**流式推送叙事文字给玩家
-2. **后**全部生成完毕后批量执行状态变更
+2. **同时**后台记账链（书记官 → 物资官 → 推送 → 预计算）并行执行，叙事流完成后 `await` 收尾
 
 ### 设计目的
 
 - 玩家即时看到叙事（低延迟感知）
-- 状态变更不阻塞叙事输出
+- 状态变更不阻塞叙事输出；反之，叙事的播放时间反过来掩盖了记账与预计算的延迟
 
 ## 角色再定位机制
 
@@ -480,22 +625,23 @@ public class PrecomputedActionCache
 ## 附加决策
 
 - **禁用Inline XML状态标记** — 状态变更严格代码层处理
-- **Game AI全角色启用思考模式** — EnableThinking = true
+- **思考模式按角色差异化** — 关键路径角色 `EnableThinking = false`，叙事/建筑师 `= true`
 - **Token配置服务端自决** — MaxTokens / ThinkingBudget不接受客户端配置
-- **导演AI结构化输出规范** — 严格JSON字段约束，不允许自由文本
+- **导演AI/书记官结构化输出规范** — 严格JSON字段约束，不允许自由文本
 
 ## 资产账本与道具生成（item_hints → 物资官记账）
 
 ### 信息流
 
 ```
-分类AI门卫(只读账本,三态) → 掷骰 → 导演AI(推演+item_hints[is_key])
-  → 道具AI依蓝图记账落库 → [预计算读新账本 ‖ 叙事AI扩写流式]
+分类AI门卫(只读账本,三态) → 掷骰 → 前台导演AI(推演，产出既定事实)
+  → [ 叙事AI扩写流式
+    ‖ 书记官(依既定事实产 item_hints[is_key]) → 道具AI依蓝图记账落库 → 预计算读新账本 ]
 ```
 
-### 导演 item_hints（权威蓝图）
+### 书记官 item_hints（权威蓝图）
 
-导演AI在本轮发生资产变更时输出 `item_hints` 数组，每条含：
+书记官在本轮发生资产变更时输出 `item_hints` 数组（v4.0.0 前由导演AI输出），每条含：
 
 | 字段 | 说明 |
 |------|------|
@@ -505,7 +651,7 @@ public class PrecomputedActionCache
 | `note` | 补充说明（如情报内容概要） |
 | `is_key` | 是否关键剧情道具/重要资产 |
 
-**hint 纪律**：导演仅 hint **关键剧情道具/重要资产**（值得进背包/账本的）；普通易耗品、环境常见资源不 hint（交给叙事描写、由门卫宽松放行）；无变更输出 `[]`。
+**hint 纪律**：书记官仅 hint **关键剧情道具/重要资产**（值得进背包/账本的）；普通易耗品、环境常见资源不 hint（交给叙事描写、由门卫宽松放行）；无变更输出 `[]`。书记官只能记前台导演已写明的资产变动，**不得自行发明道具**。
 
 ### 物资官记账（数值补全）
 
@@ -520,7 +666,7 @@ public class PrecomputedActionCache
 | `linked_attribute` | 关联属性 (STR/DEX/CON/INT/WIS/CHA) |
 | `max_uses` + `is_unlimited` | 使用次数设定（冷兵器无限；火器3-5；消耗品1） |
 
-落库：物理道具调 `InventoryService`（获得/消耗/丢失）；无形资产调 `KnownAssetService`（登记/作废）。Hub 在记账后、叙事前推送 `UpdateInventory` / `UpdateKnownAssets`。
+落库：物理道具调 `InventoryService`（获得/消耗/丢失）；无形资产调 `KnownAssetService`（登记/作废）。Hub 在记账后推送 `UpdateInventory` / `UpdateKnownAssets`（v4.0.0 起发生在叙事流式期间，而非叙事之前）。
 
 ### 账本生命周期
 
@@ -573,7 +719,7 @@ public class PrecomputedActionCache
 
 ### 短路逻辑
 
-当 `feasibility=infeasible` 时，Coordinator 直接返回拒绝叙事，跳过导演AI、骰子、记账、状态变更等全部环节，节省大模型调用和数据库查询。
+当 `feasibility=infeasible` 时，Coordinator 直接返回拒绝叙事，跳过导演AI、骰子、记账、状态变更等全部环节，节省大模型调用和数据库查询。**v4.2.0 起**：短路分支额外以 SuggestionsOnly 轻量模式（以拒绝叙事为既定事实）产出 2 个「补救方向」选项（仅 `!DryRun`），并修复了 `ProcessPlayerActionAsync` 此前未推送拒绝叙事的缺陷——玩家现在会看到「拒绝叙事 + 补救选项」而非无反馈。
 
 ### 设计考量
 
@@ -587,7 +733,7 @@ public class PrecomputedActionCache
 
 ## 局面快照（SituationSnapshot）
 
-世界状态从旧的平铺JSON升级为结构化局面快照，统一服务于分类AI和导演AI。
+世界状态从旧的平铺JSON升级为结构化局面快照，统一服务于分类AI、前台导演AI与书记官AI。
 
 ### Schema
 
@@ -617,12 +763,13 @@ public class PrecomputedActionCache
 | AI | 读取内容 | 说明 |
 |----|----------|------|
 | 分类AI | 快照（**过滤** `change_history`） | 只需当前状态判优劣势/可行性 |
-| 导演AI | 快照（**保留** `change_history`） | 需历史推演下一步 |
+| 前台导演AI | 快照（**保留** `change_history`） | 需历史推演下一步 |
+| 书记官AI | 快照（当前状态）+ 前台导演既定事实 | 以当前快照为基准计算差量，只输出变化字段 |
 | 叙事AI | `recentNarrative`（原始叙事文本） | 保持文风连贯性 |
 
 ### world_state_changes 输出规范
 
-导演AI每轮输出 `WorldStateChangesDto`（结构化对象），代码层合并到快照：
+**书记官**每轮输出 `WorldStateChangesDto`（结构化对象，v4.0.0 前由导演AI输出），代码层合并到快照：
 
 | 字段 | 说明 | nullable |
 |------|------|----------|
@@ -635,7 +782,7 @@ public class PrecomputedActionCache
 | `flags` | 关键标记（全量替换） | 是 |
 | `summary` | 本轮事件摘要（写入change_history） | **否** |
 
-核心规则：仅变化的字段才输出，未变化保持上一轮值。`summary` 必出。
+核心规则：仅变化的字段才输出，未变化保持上一轮值。`summary` 必出。落库时沿用**交互计数递增前捕获的轮次**（`applyRound`），避免并行记账与计数递增竞争导致 `change_history` 轮次错位。
 
 ---
 
@@ -643,6 +790,13 @@ public class PrecomputedActionCache
 
 | 版本 | 日期 | 变更类型 | 说明 |
 |------|------|----------|------|
+| 4.4.2 | 2026-09-16 | **提示词调优** | 书记官选项接住导演引导线索：`scribe_system.txt`「两档通用规则」新增一条——既定事实中的「引导线索」（`BuildDirectorFacts` 将导演 `narrative_hooks` 拼入的段落）是导演埋的方向暗示，两选项至少一个顺线索延伸，多线索时分别对应两条（细粒度档抉择点各线索对应不同岔路），单线索时另一选项给不同方向，禁止同跟一条；规则以“含`引导线索:`一行”为前置条件（该段仅 `NarrativeHooks.Count>0` 时才拼接），无该行时按其余既定事实与世界状态自然延伸，两种情况均自洽。背景：导演模板 `player_choice_point` 规则早已要求“hooks 输出各选项的隐含暗示”，但书记官侧从未有读取指令，hooks 只以隐性路径影响选项（“查看手机短信”反复出现即此路径的副作用）。防黏着规则（上轮未选的线索换切入）待定，硬保证需向 `ScribeInput` 注入 `LastSuggestedActions`。同批：删已废弃的 `director_system.txt`（无代码加载，含 5 份 bin 副本；csproj 通配符复制无需改）；`director_front_system.txt` 123→122 行（删纯旁白“这四层信息让叙事AI能写出…”）；`scribe_system.txt` 99→98 行（“未变化字段不输出（代码层保留上一轮值）”并入总规则删重复行；删 item_hints 字段清单行（schema 已列全、“物资官补全数值”已述）；schema `action_text` “15字内”改“字数见节奏档规则”，消除与粗粒度档 20 字的矛盾）。已核实保留：L63 位置变化影响优劣势（分类AI读世界状态定 advantage）、隐藏支线先 unlocked 后 completed 的顺序约束、“选中后导演一次性推演”依据句 |
+| 4.4.1 | 2026-09-16 | **瘦身重构** | 前台导演提示词瘦身第二批（`director_front_system.txt` 132→123 行）：① 删 `[常规行动]` 规则——掷骰条件只看 `Judgment.Needed && Skill && Dc>0` 不看 IsRoutine，该标记可与 `[判定结果]` 共现而对撞，且“无[判定结果]时直接描述”已覆盖其语义；连带清 `DirectorInput.IsRoutine`、`DirectorAiService.routineTag`、`DirectorSuite` 透传、`DirectorInputCase.IsRoutine`、`director.json` 8 处 `is_routine` 键（分类侧 `ClassificationResult.IsRoutine` 保留）；② 删同义反复的 `tension_level反映当前剧情紧张程度` 与重复的 `只输出结构化JSON`；③ `主线进度利用规则` 并入 `主动引导规则`，“让导演自己数 change_history 连续3轮”改为响应 `[剧情推进提示]`（`DetectStagnationAsync` 已做同一检测，去双轨）；④ schema 内联说明与写作规则段去双写（narrative_seed/prose_guidance/dialogue_direction 内联只留一句定位，细则保留在规则段；`beat_scale` 内联尾句与 L3/「判定次序」重复，删）；⑤ 新增 `[支线任务清单]`/`[隐藏内容清单]` 使用规则（此前每轮注入但零规则；`DirectorAiService`/`DirectorInput` “供导演标记完成时精确匹配”的过时注释同步改正）。保留：`[推进型行动]` 三处强制表述（v4.3.x 为解决导演不升 chapter 有意加的冗余）、引号约束（`RepairUnescapedQuotes` 仅是启发式兜底） |
+| 4.4.0 | 2026-09-16 | **瘦身重构** | 前台导演瘦身：整链拆除 `needs_state_change`。该字段在 v4.0.0 拆出书记官后失去记账字段排除的标的，v4.3.0 后又失去书记官分流的标的，全链路仅剩两处消费：导演 `[无需状态变更]` 标记（字段白名单漏列 `beat_scale`/`narrative_word_target`/`beats`，反而误导导演省略档位字段）与时段推进门控（导演模板自身已约束简单观察不推进，双重门控无增量保险）。移除：`classifier_system.txt` 「三、是否需要状态变更」与输出键（后续节重编号）；`ClassificationResult`/`DirectorInput`/`GameActionResult.NeedsStateChange`；`ActionClassifierService` 解析与日志；`DirectorAiService` 的 `stateChangeTag`；`director_front_system.txt` 的 `[无需状态变更]` 规则；`AiCoordinatorService` 时段推进改为 `if (directorOutput.TimeAdvance)`；AIEval `DirectorInputCase.NeedsStateChange` 与 `director.json` 的 8 处用例键。行为变化仅一处：`time_advance` 不再被上游分类误判吞掉，`[推进型行动]` 的时段推进得以稳定生效 |
+| 4.3.0 | 2026-09-16 | **缺陷修复** | 书记官常规轮始终完整记账：移除纯叙事轮（`NeedsStateChange=false`）的 SuggestionsOnly 分流，所有经过导演蓝图的轮次一律走完整书记官（接收全量上下文、产出全部结构化字段）；`ApplyCachedActionResultAsync` 移除 `NeedsStateChange` 门控（改为只要 `ScribeOutput.WorldStateChanges != null` 就落库）；SuggestionsOnly 仅保留给无导演蓝图的场景（开场轮/不可行短路）。根治「信息获取类行动未记账 → 叙事层与世界状态层脱节 → 后续轮次导演覆盖前轮剧情」的连贯性 bug |
+| 4.2.0 | 2026-09-16 | **机制升级** | 行动选项全场景覆盖：书记官新增 SuggestionsOnly 轻量模式统一覆盖纯叙事轮/开场轮（首次进入·重新开始·同题异卷重玩）/不可行短路，只产出 suggested_actions 不记账不落库；新增 `AiCoordinatorService.BuildSuggestionsOnlyInputAsync`/`GenerateSuggestionsOnlyAsync`，Hub `ProcessSelectDungeonAsync` 步骤9 + `ProcessRestartSessionAsync` 在 DungeonReady 后生成开场选项；不可行短路复用 `RunScribeTaskAsync` 产出补救选项并修复 `ProcessPlayerActionAsync` 拒绝叙事未推送缺陷（补 else if 分支）；新增挂起/断线恢复选项持久化（`GameDungeonSession.LastSuggestedActions` + 恢复跳过回归旁白续上离开前最后一轮 + `CheckActiveSessionAsync`/`ActiveSessionCheckOutput` 分层降级）；预计算缓存 TTL 1小时→1天 |
+| 4.1.0 | 2026-09-13 | **性能优化** | 预计算深度下调到 L1（导演层）：`PrecomputeSingleOptionAsync` 不再预生成叙事、不 await 书记官（fire-and-forget 预跑保留 `ScribeTask` 句柄），就绪时刻 ~35s→~15s；点选路径 `ProcessSelectCachedActionAsync` 重构为「叙事实时流式（`StreamNarrativeLiveAsync`）‖ 后台链链首 await 书记官回填 → `ApplyCachedActionResultAsync` 落库 → 物资官记账 → 启动下一轮预计算」，session/character 改落库后读取、叙事日志与下一轮选项 DTO 后置构建；章节档统一实时流式（`ChapterPrefetchBeats`/`StreamChapterContinuationAsync`/`NextBeatIndex`/`NarrativeText` 闲置废弃）；`ActionPrecomputeService` 删除 `IOptions<GameAiOptions>`/`narrativeAi` 依赖、新增 `SessionActionCache.OptionsShownAt` + `MarkOptionsShown`/`GetOptionsShownAt`；新增两个延迟埋点（玩家思考间隔 / 叙事首 token 延迟，均 `LogInformation`）；L1.5（叙事首 token 开放）列为备用方案 |
+| 4.0.0 | 2026-09-13 | **架构重构** | 导演管线重构（延迟优化）：新增**书记官AI**（`ScribeAiService` + `scribe_system.txt` + `Scribe` 模型配置）接管 `world_state_changes`（含quest_progress）/`item_hints`/`npc_attitude_changes`/`suggested_actions`，作为后台 Task 与叙事流式并行（`GameActionResult.ScribeTask`，独立 DI scope，Hub 读字段前 await）；导演模板拆出 `director_front_system.txt`（输出 schema 砍半、npc_actions 去 attitude_change）；物资官记账链整体移出关键路径（书记官→物资官→推送→预计算）；`NeedsStateChange=false` 轮次跳过书记官（纯叙事轮零成本，代价是无建议选项）；书记官失败重试1次、仍失败则状态不变且叙事不中断；分类AI/导演AI 关闭思考模式、导演模型回到 `deepseek-v4-flash`；预计算缓存存双输出（入库前 await 书记官并置 null）、`ApplyCachedActionResultAsync` 改读 `ScribeOutput`、AIEval `DirectorSuite` 适配 |
 | 3.6.0 | 2026-07-25 | **健壮性加固** | 物资官记账失败降级：按结构化蓝图规则化保底落库（`RecordFromBlueprintAsync` 新增 blueprint 参数，物品默认重量0.5、is_key→关键道具），失败日志含会话/行动/蓝图摘要；缓存选项路径补齐背包超重门卫（≥100%阻断）；缓存过期/未命中改为以选项文本（协议新增 `ActionText`）走常规全链路，旧客户端兜底提示重新输入；重开副本软删、放弃会话硬删已知情报账本，前端清理函数同步清空线索区 |
 | 3.5.0 | 2026-07-25 | **架构升级** | 资产账本方案（导演后记账 + 单门卫）：新增道具AI（物资官）于导演后、叙事前依导演蓝图 `item_hints`（含 is_key）记账落库（物理走 InventoryService、无形走 KnownAssetService）；分类AI升级为唯一综合门卫（三态可行性 feasible/uncertain/infeasible + 普通资源放过，只读账本）；叙事AI新增道具纪律（不得增删蓝图交付）；预计算启动时机改为记账后与叙事并行（根治死按钮）；背包/情报叙事前刷新；`acquired_items/consumed_items` 内联应用退役（仅保留反序列化容错） |
 | 3.4.0 | 2026-07-21 | **性能优化** | 预计算机制按 `beat_scale` 分治：micro/normal 维持整段预生成秒开；chapter 不再整章预生成，仅预取首 N 段（`ChapterPrefetchBeats`，默认1），点选后秒回放前缀 + 从断点实时分段续写（边读边生成掩盖延迟），将章节档未选选项白烧从最多 16 次降到 2N 次；新增 `PrecomputedActionCache.NextBeatIndex`；修复缓存回放分块器 `Trim()` 掉 `\n\n` 导致的段落塌陷 bug |

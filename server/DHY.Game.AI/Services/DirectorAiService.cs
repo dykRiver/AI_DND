@@ -55,7 +55,8 @@ public class DirectorAiService : ITransient
 
         try
         {
-            var systemPrompt = _promptService.LoadTemplate("director_system");
+            // 前台导演模板：只输出叙事推演字段，状态记账已拆给书记官(ScribeAiService)
+            var systemPrompt = _promptService.LoadTemplate("director_front_system");
 
             // 构造上下文消息列表（按注意力权重排列，关键信息放最后）
             var messages = new List<ChatMessage>
@@ -118,7 +119,7 @@ public class DirectorAiService : ITransient
                 messages.Add(new ChatMessage { Role = "assistant", Content = "已了解主线进度。" });
             }
 
-            // 支线任务清单（供导演AI标记完成时精确匹配任务名）
+            // 支线任务清单（含触发条件，供导演埋线索/制造触发契机；完成标记归书记官）
             if (!string.IsNullOrEmpty(input.SideQuestList))
             {
                 messages.Add(new ChatMessage
@@ -129,7 +130,7 @@ public class DirectorAiService : ITransient
                 messages.Add(new ChatMessage { Role = "assistant", Content = "已了解支线任务清单。" });
             }
 
-            // 隐藏内容清单（供导演AI标记发现时精确匹配内容名）
+            // 隐藏内容清单（含触发条件，供导演埋线索；发现标记归书记官）
             if (!string.IsNullOrEmpty(input.HiddenContentList))
             {
                 messages.Add(new ChatMessage
@@ -184,10 +185,19 @@ public class DirectorAiService : ITransient
                 messages.Add(new ChatMessage { Role = "assistant", Content = "明白，我会在本轮主动引入推进线索。" });
             }
 
+            // 推进型行动提示（玩家点选了粗粒度剧情推进选项，在玩家行动消息之前注入）
+            if (input.IsAdvanceAction)
+            {
+                messages.Add(new ChatMessage
+                {
+                    Role = "user",
+                    Content = "[推进型行动] 玩家选择的是一个粗粒度剧情推进方向，覆盖一段旅程/一个时段/一整段事件。本轮必须 beat_scale=chapter 并输出 beats 分镜表，一次性推演完整段推进，不得只推演第一步就收尾。"
+                });
+                messages.Add(new ChatMessage { Role = "assistant", Content = "明白，本轮我将以章节档一次性推演完这整段推进，并输出 beats 分镜表。" });
+            }
+
             // 玩家本次行动（最末尾，优先注意力）
-            var routineTag = input.IsRoutine ? "[常规行动] " : "";
-            var stateChangeTag = !input.NeedsStateChange ? "[无需状态变更] " : "";
-            var actionPrefix = routineTag + stateChangeTag;
+            var actionPrefix = input.IsAdvanceAction ? "[推进型行动] " : "";
             var actionContent = !string.IsNullOrEmpty(input.ActionIntent)
                 ? $"{actionPrefix}玩家行动意图: {input.ActionIntent}\n玩家原始表达: {input.PlayerAction}"
                 : $"{actionPrefix}玩家行动: {input.PlayerAction}";
@@ -238,9 +248,9 @@ public class DirectorAiService : ITransient
 
     private DirectorOutput? ParseDirectorOutput(string content)
     {
+        var cleaned = CleanJsonContent(content);
         try
         {
-            var cleaned = CleanJsonContent(content);
             var output = JsonConvert.DeserializeObject<DirectorOutput>(cleaned, _jsonSettings);
             if (output != null && string.IsNullOrEmpty(output.NarrativeSeed))
             {
@@ -251,9 +261,76 @@ public class DirectorAiService : ITransient
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("导演输出解析失败: {Error}, 原始内容: {Content}", ex.Message, content);
+            // 常见损坏：模型在字符串值内嵌入未转义的ASCII双引号（如对话引语）破坏JSON结构，修复后重试
+            _logger.LogWarning("导演输出解析失败，尝试引号修复: {Error}", ex.Message);
+        }
+
+        try
+        {
+            var repaired = RepairUnescapedQuotes(cleaned);
+            var output = JsonConvert.DeserializeObject<DirectorOutput>(repaired, _jsonSettings);
+            if (output != null)
+                _logger.LogWarning("导演输出引号修复后解析成功（模型输出含未转义双引号）");
+            return output;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("导演输出修复后仍解析失败: {Error}, 原始内容: {Content}", ex.Message, content);
             return null;
         }
+    }
+
+    /// <summary>
+    /// 启发式修复JSON字符串值内未转义的ASCII双引号：
+    /// 逐字符扫描跟踪是否处于字符串内；字符串内遇到双引号时，若其后首个非空字符为结构字符(: , } ]或结尾)则视为字符串结束引号，
+    /// 否则视为内容内嵌引号并转义为\"。仅作为解析失败后的兜底重试手段。
+    /// </summary>
+    private static string RepairUnescapedQuotes(string json)
+    {
+        var sb = new System.Text.StringBuilder(json.Length + 16);
+        var inString = false;
+        for (var i = 0; i < json.Length; i++)
+        {
+            var c = json[i];
+            if (!inString)
+            {
+                if (c == '"') inString = true;
+                sb.Append(c);
+                continue;
+            }
+
+            if (c == '\\')
+            {
+                // 已有转义序列：原样复制（含反斜杠后一个字符）
+                sb.Append(c);
+                if (i + 1 < json.Length)
+                {
+                    sb.Append(json[i + 1]);
+                    i++;
+                }
+                continue;
+            }
+
+            if (c == '"')
+            {
+                // 前瞻判定：结束引号 or 内嵌引号
+                var j = i + 1;
+                while (j < json.Length && char.IsWhiteSpace(json[j])) j++;
+                if (j >= json.Length || json[j] is ':' or ',' or '}' or ']')
+                {
+                    inString = false;
+                    sb.Append(c);
+                }
+                else
+                {
+                    sb.Append('\\').Append(c);
+                }
+                continue;
+            }
+
+            sb.Append(c);
+        }
+        return sb.ToString();
     }
 
     private async Task LogAiCallAsync(long? sessionId, string modelName, AiCompletionResult result, long durationMs)

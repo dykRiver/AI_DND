@@ -1,11 +1,9 @@
 using System.Collections.Concurrent;
 using DHY.Game.AI.Dtos;
 using DHY.Game.AI.Models;
-using DHY.Game.AI.Options;
 using DHY.Game.Core.Entities;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace DHY.Game.AI.Services;
 
@@ -20,17 +18,19 @@ public class PrecomputedActionCache
     /// <summary>方向提示</summary>
     public string Hint { get; set; } = "";
 
+    /// <summary>
+    /// 选项粒度（ActionScales.Detail / Advance）：预计算时已传给导演，
+    /// 缓存未命中回退常规流程时也需带上，保证粗粒度选项两条路径都走章节档。
+    /// </summary>
+    public string Scale { get; set; } = ActionScales.Detail;
+
     /// <summary>预计算结果（含NarrativeInput、DiceResult、StateChanges等）</summary>
     public GameActionResult? Result { get; set; }
 
-    /// <summary>预生成的叙事文本（非章节档=完整正文；章节档=已预取的前 N 段前缀）</summary>
+    /// <summary>【L1改造后废弃】预生成叙事文本：叙事已改为点选后实时流式生成，此字段恒为空。</summary>
     public string NarrativeText { get; set; } = "";
 
-    /// <summary>
-    /// 章节档续写起始分镜索引：
-    /// -1 = 非章节档（NarrativeText 为完整正文，点选后直接回放）；
-    /// >=0 = 章节档（NarrativeText 为已预取前缀，点选后回放前缀并从该索引起实时续写）。
-    /// </summary>
+    /// <summary>【L1改造后废弃】章节档续写起始分镜索引：叙事统一点选后实时流式，此字段恒为 -1。</summary>
     public int NextBeatIndex { get; set; } = -1;
 
     /// <summary>创建时间（用于TTL过期）</summary>
@@ -38,8 +38,8 @@ public class PrecomputedActionCache
 
     /// <summary>
     /// 该选项是否可行：
-    /// false 仅当预计算明确判定为不可行短路（Result 非空但 NarrativeInput 为空，即拒绝文案）；
-    /// 预计算失败（Result 为空）时保持 true，以便点选时回退常规流程。
+    /// false 仅当预计算明确命中不可行短路（分类AI判 infeasible，即 Result.IsInfeasibleShortCircuit）；
+    /// 导演解析失败/流程中断、或预计算失败（Result 为空）均保持 true，以便点选时回退常规流程。
     /// </summary>
     public bool IsFeasible { get; set; } = true;
 }
@@ -57,6 +57,9 @@ public class SessionActionCache
 
     /// <summary>预计算是否全部完成</summary>
     public bool IsReady { get; set; }
+
+    /// <summary>选项推送给前端的时刻（埋点①：统计玩家从看到选项到点击的思考间隔）</summary>
+    public DateTime OptionsShownAt { get; set; }
 }
 
 /// <summary>
@@ -66,17 +69,14 @@ public class ActionPrecomputeService : ISingleton
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<ActionPrecomputeService> _logger;
-    private readonly GameAiOptions _options;
     private readonly ConcurrentDictionary<long, SessionActionCache> _cache = new();
-    private static readonly TimeSpan Ttl = TimeSpan.FromHours(1);
+    private static readonly TimeSpan Ttl = TimeSpan.FromDays(1);
 
     public ActionPrecomputeService(
         IServiceScopeFactory scopeFactory,
-        IOptions<GameAiOptions> options,
         ILogger<ActionPrecomputeService> logger)
     {
         _scopeFactory = scopeFactory;
-        _options = options.Value;
         _logger = logger;
     }
 
@@ -100,20 +100,32 @@ public class ActionPrecomputeService : ISingleton
             {
                 ActionText = o.ActionText,
                 Hint = o.Hint,
+                Scale = o.Scale,
                 CreatedAt = DateTime.Now
             }).ToList()
         };
         _cache[sessionId] = sessionCache;
 
-        // 顺序执行2个选项的预计算（避免SqlSugar MARS并发冲突）
-        var results = new (GameActionResult? result, string narrativeText, int nextBeatIndex)[sessionCache.Options.Count];
+        // 并行执行2个选项的预计算（原为串行 for）。
+        // 关键：ExecutionContext.SuppressFlow() 切断子任务对父 ExecutionContext 的继承，
+        // 使每个选项子任务以空 AsyncLocal 上下文启动 → SqlSugarScope 为其分配独立连接，
+        // 实现“任务间连接隔离(避免SqlSugar MARS并发冲突)、任务内共享同一连接(事务一致)”。
+        var tasks = new Task<(GameActionResult? result, string narrativeText, int nextBeatIndex)>[sessionCache.Options.Count];
         for (int i = 0; i < sessionCache.Options.Count; i++)
         {
-            results[i] = await PrecomputeSingleOptionAsync(sessionId, sessionCache.Options[i].ActionText, i);
+            int idx = i; // 闭包副本，避免捕获循环变量
+            var optionActionText = sessionCache.Options[i].ActionText;
+            var optionScale = sessionCache.Options[i].Scale;
+            using (ExecutionContext.SuppressFlow())
+            {
+                tasks[idx] = Task.Run(() => PrecomputeSingleOptionAsync(sessionId, optionActionText, idx, optionScale));
+            }
         }
 
         try
         {
+            var results = await Task.WhenAll(tasks);
+
             // 检查缓存在计算期间是否被失效（玩家发起新行动触发InvalidateCache）
             if (!_cache.TryGetValue(sessionId, out var current) || current != sessionCache)
             {
@@ -127,8 +139,10 @@ public class ActionPrecomputeService : ISingleton
                 sessionCache.Options[i].Result = result;
                 sessionCache.Options[i].NarrativeText = narrativeText;
                 sessionCache.Options[i].NextBeatIndex = nextBeatIndex;
-                // 仅当明确命中不可行短路（有 Result 但无 NarrativeInput）时标记为不可行
-                sessionCache.Options[i].IsFeasible = !(result != null && result.NarrativeInput == null);
+                // 仅当分类AI明确短路拒绝（infeasible）时标记不可行；
+                // 导演解析失败/流程中断（Result 非空、NarrativeInput 为空但 Feasibility 非 infeasible）不属于"不可行"，
+                // 保持可点击，点选时由 GetCachedResult 视为未命中回退常规流程
+                sessionCache.Options[i].IsFeasible = !(result != null && result.IsInfeasibleShortCircuit);
             }
 
             sessionCache.IsReady = true;
@@ -166,6 +180,11 @@ public class ActionPrecomputeService : ISingleton
         if (option.Result == null)
             return null;
 
+        // 导演解析失败/流程中断的兜底结果（Result 非空但 NarrativeInput 为空，且非不可行短路）：
+        // 缓存中只有"世界没有反应"兜底文案，回放它会让玩家看到无意义叙事，视为未命中回退常规流程重跑
+        if (option.Result.NarrativeInput == null && !option.Result.IsInfeasibleShortCircuit)
+            return null;
+
         return option;
     }
 
@@ -186,14 +205,32 @@ public class ActionPrecomputeService : ISingleton
     }
 
     /// <summary>
+    /// 标记选项已推送给前端的时刻（埋点①）。缓存不存在时静默忽略。
+    /// </summary>
+    public void MarkOptionsShown(long sessionId)
+    {
+        if (_cache.TryGetValue(sessionId, out var sessionCache))
+            sessionCache.OptionsShownAt = DateTime.Now;
+    }
+
+    /// <summary>
+    /// 读取选项推送时刻（埋点①：供点选入口计算玩家思考间隔）。无缓存或未标记返回 null。
+    /// </summary>
+    public DateTime? GetOptionsShownAt(long sessionId)
+    {
+        return _cache.TryGetValue(sessionId, out var sessionCache) && sessionCache.OptionsShownAt != default
+            ? sessionCache.OptionsShownAt
+            : null;
+    }
+
+    /// <summary>
     /// 预计算单个选项（在独立scope中执行，DryRun模式）
     /// </summary>
     private async Task<(GameActionResult? result, string narrativeText, int nextBeatIndex)> PrecomputeSingleOptionAsync(
-        long sessionId, string actionText, int optionIndex)
+        long sessionId, string actionText, int optionIndex, string actionScale)
     {
         using var scope = _scopeFactory.CreateScope();
         var aiCoordinator = scope.ServiceProvider.GetRequiredService<AiCoordinatorService>();
-        var narrativeAi = scope.ServiceProvider.GetRequiredService<NarrativeAiService>();
 
         try
         {
@@ -205,33 +242,23 @@ public class ActionPrecomputeService : ISingleton
             {
                 SessionId = sessionId,
                 ActionText = actionText,
-                DryRun = true
+                DryRun = true,
+                // 粗粒度推进选项：预演时就要让导演走章节档，否则缓存命中回放的仍是 normal 档结果
+                ActionScale = actionScale
             };
 
             var result = await aiCoordinator.ProcessPlayerActionAsync(processInput);
 
-            // 2. 生成叙事文本
-            //    - 非章节档：一次性预生成完整正文（点选秒开回放），nextBeatIndex=-1
-            //    - 章节档：仅预取前 N 段（N=ChapterPrefetchBeats，默认1），其余分镜点选后边读边实时续写
-            var narrativeText = "";
-            var nextBeatIndex = -1;
-            if (result?.NarrativeInput != null)
-            {
-                if (NarrativeAiService.IsChapterScale(result.NarrativeInput))
-                {
-                    var prefetch = _options.ChapterPrefetchBeats > 0 ? _options.ChapterPrefetchBeats : 1;
-                    (narrativeText, nextBeatIndex) = await narrativeAi.GenerateChapterPrefixAsync(result.NarrativeInput, prefetch, sessionId);
-                }
-                else
-                {
-                    narrativeText = await narrativeAi.GenerateNarrativeAsync(result.NarrativeInput, sessionId);
-                }
-            }
+            // 2. 【L1改造】预计算深度砍到“导演层”：不再生成叙事、不再 await 书记官。
+            //    - 叙事：改由玩家点选后实时流式生成（Hub 的 StreamNarrativeLiveAsync）。
+            //      就绪时刻从“导演+叙事(~35s)”降到“导演(~15s)”，让选项在玩家读完本轮叙事时即已就绪。
+            //    - 书记官：ProcessPlayerActionAsync 内已 fire-and-forget 启动（result.ScribeTask），此处保留句柄、不 await，
+            //      让其后台与“就绪判定”并行完成；点选时再 await 回填 ScribeOutput/ItemHints/SuggestedActions。
+            //      RunScribeTaskAsync 自建独立DI scope且自捕异常，句柄可安全跨请求存活到点选。
+            _logger.LogDebug("预计算完成(导演层): SessionId={SessionId}, Option={Index}, 可行={Feasible}",
+                sessionId, optionIndex, result?.NarrativeInput != null);
 
-            _logger.LogDebug("预计算完成: SessionId={SessionId}, Option={Index}, 叙事长度={Length}, 续写起始={NextBeatIndex}",
-                sessionId, optionIndex, narrativeText.Length, nextBeatIndex);
-
-            return (result, narrativeText, nextBeatIndex);
+            return (result, "", -1);
         }
         catch (Exception ex)
         {

@@ -200,6 +200,31 @@ public class DungeonExploreService : IDynamicApiController, ITransient
             })
             .ToList();
 
+        // 8. 解析离开前最后一轮的建议行动选项（书记官产出，已序列化存于 session.LastSuggestedActions）
+        //   前端直接以文本显示按钮；点选后服务端自动分流：
+        //   内存预计算缓存命中→秒响应；未命中/过期→以 ActionText 走常规全链路。
+        var suggestedActions = new List<ActiveSessionSuggestedAction>();
+        if (!string.IsNullOrEmpty(session.LastSuggestedActions))
+        {
+            try
+            {
+                var arr = JArray.Parse(session.LastSuggestedActions);
+                int idx = 0;
+                foreach (var item in arr)
+                {
+                    var actionText = item["action_text"]?.ToString() ?? item["ActionText"]?.ToString() ?? "";
+                    if (string.IsNullOrWhiteSpace(actionText)) continue;
+                    suggestedActions.Add(new ActiveSessionSuggestedAction
+                    {
+                        Index = idx++,
+                        ActionText = actionText,
+                        Hint = item["hint"]?.ToString() ?? item["Hint"]?.ToString() ?? ""
+                    });
+                }
+            }
+            catch { /* 解析失败则留空，前端仅不显示按钮，不影响续玩 */ }
+        }
+
         return new ActiveSessionCheckOutput
         {
             SessionId = session.Id,
@@ -225,7 +250,8 @@ public class DungeonExploreService : IDynamicApiController, ITransient
                 IsFatigued = character?.IsFatigued ?? false,
                 IsInCombat = character?.IsInCombat ?? false
             },
-            RecentNarratives = recentNarratives
+            RecentNarratives = recentNarratives,
+            SuggestedActions = suggestedActions
         };
     }
 }

@@ -214,6 +214,11 @@ export interface ActiveSessionResult {
   worldInfo: WorldInfo
   gameState: GameState
   recentNarratives: ActiveSessionNarrative[]
+  /**
+   * 离开前最后一轮的建议行动选项（来自 session.LastSuggestedActions）。
+   * 仅文本，无 isFeasible：点选后服务端自动分流（缓存命中→秒响应；未命中→常规全链路）。
+   */
+  suggestedActions?: SuggestedAction[]
 }
 
 export interface ActiveSessionNarrative {

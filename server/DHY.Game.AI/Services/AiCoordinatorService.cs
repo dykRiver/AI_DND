@@ -36,6 +36,7 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
     private readonly SqlSugarRepository<GameNarrativeLog> _narrativeLogRep;
     private readonly ILogger<AiCoordinatorService> _logger;
     private readonly AiModelFactory _modelFactory;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     private static readonly JsonSerializerSettings _jsonSettings = new()
     {
@@ -60,7 +61,8 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
         SqlSugarRepository<GameNpcProfile> npcRep,
         SqlSugarRepository<GameNarrativeLog> narrativeLogRep,
         ILogger<AiCoordinatorService> logger,
-        AiModelFactory modelFactory)
+        AiModelFactory modelFactory,
+        IServiceScopeFactory scopeFactory)
     {
         _classifier = classifier;
         _director = director;
@@ -80,6 +82,7 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
         _narrativeLogRep = narrativeLogRep;
         _logger = logger;
         _modelFactory = modelFactory;
+        _scopeFactory = scopeFactory;
     }
 
     private bool DebugEnabled => _modelFactory.IsDebugEnabled;
@@ -176,11 +179,23 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
                 }).ExecuteCommandAsync();
             }
 
-            return new GameActionResult
+            var rejectResult = new GameActionResult
             {
                 Narrative = rejectText,
-                IsChoicePoint = false
+                IsChoicePoint = false,
+                Feasibility = classification.Feasibility
             };
+
+            // 场景10补齐：不可行短路也产出2个补救选项（复用书记官轻量模式，以拒绝叙事为[本轮既定事实]）。
+            // 仅真实行动(!DryRun)时生成；预计算DryRun只关心可行性判定，无需补救选项。
+            // ScribeTask 由 Hub 后台记账链 await 后回填 SuggestedActions 并启动预计算、推送选项。
+            if (!input.DryRun)
+            {
+                var rejectScribeInput = await BuildSuggestionsOnlyInputAsync(sessionId, actionText, rejectText, characterName);
+                rejectResult.ScribeTask = RunScribeTaskAsync(sessionId, rejectResult, rejectScribeInput, session.InteractionCount, false, npcs);
+            }
+
+            return rejectResult;
         }
 
         // 2. 成人内容短路：跳过导演AI，直接走叙事AI
@@ -198,9 +213,7 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
         if (DebugEnabled)
         {
             var routeDesc = classification.IsRoutine
-                ? (classification.NeedsStateChange
-                    ? "常规行动(需状态变更) → 导演流程(跳过骰子)"
-                    : "常规行动(无状态变更) → 导演流程(仅叙事推演)")
+                ? "常规行动 → 导演流程(跳过骰子)"
                 : "非常规行动 → 完整导演流程";
             AiDebugLogger.LogOrchestration("行动分类", routeDesc);
         }
@@ -274,13 +287,13 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             MainQuestProgress = session.MainQuest ?? "",
             RepositionSnippet = repositionSnippet,
             PlayerInventory = playerInventory,
-            IsRoutine = classification.IsRoutine,
-            NeedsStateChange = classification.NeedsStateChange,
             JudgmentOutcome = judgmentOutcome,
             CharacterName = characterName,
             IsStagnant = isStagnant,
             SideQuestList = BuildSideQuestList(session.SideQuests),
-            HiddenContentList = BuildHiddenContentList(session.HiddenContent)
+            HiddenContentList = BuildHiddenContentList(session.HiddenContent),
+            // 玩家点选粗粒度推进选项时强制导演走章节档（一次性推演整段剧情并产出大篇幅叙事）
+            IsAdvanceAction = input.ActionScale == ActionScales.Advance
         };
 
         var directorOutput = await _director.DirectAsync(directorInput, sessionId);
@@ -295,31 +308,12 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             };
         }
 
-        // 7. 物资清单（item_hints）：导演不再直接写背包。
-        //    实际资产变更由物资官(道具AI)在导演之后、叙事之前依此权威蓝图记账落库（见 GameSessionHub）。
-        //    此处收集蓝图条目，随结果透传给 Hub 供物资官逐条落实。
-        var itemHints = directorOutput.ItemHints ?? BuildLegacyItemHints(directorOutput);
-        if (DebugEnabled && itemHints is { Count: > 0 })
-            AiDebugLogger.LogOrchestration("物资推荐", string.Join("; ", itemHints.Select(h => $"{h.Change}·{h.Category}:{h.Name}")));
-
-        // 8. 应用世界状态变更（仅NeedsStateChange时生效，DryRun时跳过）
+        // 7. 状态记账（world_state_changes/item_hints/npc_attitude_changes/suggested_actions）
+        //    已拆给书记官后台Task（见步骤13），与叙事流式并行；前台仅保留时段推进等毫秒级操作
         var stateUpdate = new GameStateUpdate();
-        if (classification.NeedsStateChange && directorOutput.WorldStateChanges != null)
-        {
-            if (!input.DryRun)
-            {
-                await _worldState.ApplyChangesAsync(sessionId, directorOutput.WorldStateChanges, session.InteractionCount);
-            }
 
-            // 任务进度变化时传递给Hub，供推送前端更新支线任务状态
-            if (directorOutput.WorldStateChanges.QuestProgress != null)
-            {
-                stateUpdate.QuestProgress = directorOutput.WorldStateChanges.QuestProgress;
-            }
-        }
-
-        // 8.5 时段推进（仅NeedsStateChange时生效，DryRun时跳过）
-        if (classification.NeedsStateChange && directorOutput.TimeAdvance)
+        // 8. 时段推进（前台导演输出time_advance即生效，导演提示词自身约束简单观察/简短对话不推进；DryRun时跳过）
+        if (directorOutput.TimeAdvance)
         {
             if (!input.DryRun)
             {
@@ -350,23 +344,7 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             }
         }
 
-        // 9. 更新NPC态度（仅NeedsStateChange时生效，DryRun时跳过）
-        if (classification.NeedsStateChange && directorOutput.NpcActions != null)
-        {
-            stateUpdate.NpcAttitudeChanges = new Dictionary<string, int>();
-            foreach (var npcAction in directorOutput.NpcActions.Where(n => n.AttitudeChange != 0))
-            {
-                var npc = npcs.FirstOrDefault(n => n.NpcIdentifier == npcAction.NpcId);
-                if (npc != null)
-                {
-                    if (!input.DryRun)
-                    {
-                        await _npcService.UpdateAttitudeAsync(sessionId, npc.Id, npcAction.AttitudeChange);
-                    }
-                    stateUpdate.NpcAttitudeChanges[npcAction.NpcId] = npcAction.AttitudeChange;
-                }
-            }
-        }
+        // 9. NPC态度变更已拆给书记官（npc_attitude_changes），由书记官Task落库并回填StateChanges
 
         // 10. 准备叙事输入（由Hub流式推送到客户端）
         if (DebugEnabled)
@@ -394,7 +372,8 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             AiDebugLogger.LogOrchestration("流程结束", $"SessionId={sessionId}, 互动次数={session.InteractionCount + 1}");
         }
 
-        // 11. 更新会话计数器（DryRun时跳过）
+        // 11. 更新会话计数器（DryRun时跳过）；书记官落库沿用递增前的轮次（与旧串行流程一致）
+        var applyRound = session.InteractionCount;
         if (!input.DryRun)
         {
             session.InteractionCount++;
@@ -412,19 +391,43 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             }
         }
 
-        // 12. 返回结果（NarrativeInput由Hub流式推送叙事）
-        return new GameActionResult
+        // 12. 构建返回结果（NarrativeInput由Hub流式推送叙事；ItemHints/SuggestedActions/ScribeOutput由书记官Task回填）
+        var result = new GameActionResult
         {
             NarrativeInput = narrativeInput,
             DiceResult = diceResult,
             StateChanges = stateUpdate,
             IsChoicePoint = directorOutput.PlayerChoicePoint,
-            SuggestedActions = directorOutput.SuggestedActions,
-            NeedsStateChange = classification.NeedsStateChange,
-            ItemHints = itemHints,
             ActionIntent = classification.ActionIntent,
             Feasibility = classification.Feasibility
         };
+
+        // 13. 书记官后台Task（与叙事流式并行）：始终走完整记账模式，接收完整上下文并产出全部结构化字段。
+        //     若本轮确实无状态变化，书记官自然输出空 world_state_changes（仅含 summary），不会造成误记账；
+        //     但若存在信息获取类行动（查看新短信/阅读新文件等），书记官可正确记录知识状态变更，
+        //     避免叙事层与世界状态层脱节。
+        var scribeInput = new ScribeInput
+        {
+            PlayerAction = actionText,
+            ActionIntent = classification.ActionIntent,
+            JudgmentOutcome = judgmentOutcome,
+            DirectorFacts = BuildDirectorFacts(directorOutput),
+            WorldState = directorInput.WorldState,
+            NpcProfiles = npcProfiles,
+            PlayerInventory = playerInventory,
+            MainQuestProgress = session.MainQuest ?? "",
+            SideQuestList = directorInput.SideQuestList,
+            HiddenContentList = directorInput.HiddenContentList,
+            CharacterName = characterName,
+            SuggestionsOnly = false,
+            // 选项节奏档位：抉择点/章节档/高紧张时为关键时刻（细粒度选项），否则输出粗粒度剧情推进型选项
+            IsKeyMoment = directorOutput.PlayerChoicePoint
+                || directorOutput.BeatScale == "chapter"
+                || (directorOutput.Pacing?.TensionLevel ?? 0) >= 8
+        };
+        result.ScribeTask = RunScribeTaskAsync(sessionId, result, scribeInput, applyRound, input.DryRun, npcs);
+
+        return result;
     }
 
     /// <summary>
@@ -583,8 +586,9 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             mainQuest = JsonConvert.DeserializeObject<MainQuestData>(session.MainQuest, _jsonSettings);
         }
 
-        // 生成回归叙事（简短提示，告知玩家回到副本世界）
-        var resumeNarrative = $"你重新回到了{template.Name}的世界。眼前的一切似曾相识……";
+        // 方案A：恢复副本时不推送硬编码旁白，直接续上离开前最后一轮叙事（历史叙事由前端从CheckActiveSession HTTP接口预先恢复）。
+        // Hub 在 IsResumed=true 时会跳过 OpeningNarrative 推送，此处保留空字符串以避免语义混乱。
+        var resumeNarrative = string.Empty;
 
         return new DungeonStartResult
         {
@@ -664,40 +668,42 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             var character = await _characterRep.GetFirstAsync(c => c.SessionId == sessionId);
             var directorOutput = result.NarrativeInput?.DirectorBlueprint;
     
-            // 仅在分类AI判定需要状态变更时才执行持久化（与正常流程一致）
-            if (result.NeedsStateChange)
+            // 书记官始终走完整记账模式，只要输出了 WorldStateChanges 就落库。
+            // 预计算DryRun时书记官已回填ScribeOutput但未落库，此处补落。
             {
-                // 1. 应用世界状态变更
-                if (directorOutput?.WorldStateChanges != null)
+                var scribeOutput = result.ScribeOutput;
+
+                // 1. 应用世界状态变更（书记官输出）
+                if (scribeOutput?.WorldStateChanges != null)
                 {
-                    await _worldState.ApplyChangesAsync(sessionId, directorOutput.WorldStateChanges, session.InteractionCount);
+                    await _worldState.ApplyChangesAsync(sessionId, scribeOutput.WorldStateChanges, session.InteractionCount);
                 }
     
-                                // 2/3. 道具增减不再于此内联应用：缓存结果提交时由物资官(道具AI)依导演蓝图 item_hints 记账落库（见 GameSessionHub 缓存路径）。
+                                // 2/3. 道具增减不再于此内联应用：缓存结果提交时由物资官(道具AI)依书记官 item_hints 记账落库（见 GameSessionHub 缓存路径）。
     
-                // 5. 更新NPC态度
-                if (directorOutput?.NpcActions != null)
+                // 5. 更新NPC态度（书记官输出npc_attitude_changes）
+                if (scribeOutput?.NpcAttitudeChanges is { Count: > 0 })
                 {
                     var npcs = await _npcService.GetCriticalNpcsAsync(sessionId);
-                    foreach (var npcAction in directorOutput.NpcActions.Where(n => n.AttitudeChange != 0))
+                    foreach (var change in scribeOutput.NpcAttitudeChanges.Where(c => c.Change != 0))
                     {
                         try
                         {
-                            var npc = npcs.FirstOrDefault(n => n.NpcIdentifier == npcAction.NpcId);
+                            var npc = npcs.FirstOrDefault(n => n.NpcIdentifier == change.NpcId);
                             if (npc != null)
                             {
-                                await _npcService.UpdateAttitudeAsync(sessionId, npc.Id, npcAction.AttitudeChange);
+                                await _npcService.UpdateAttitudeAsync(sessionId, npc.Id, change.Change);
                             }
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogWarning(ex, "缓存行动NPC态度更新失败: {NpcId}", npcAction.NpcId);
+                            _logger.LogWarning(ex, "缓存行动NPC态度更新失败: {NpcId}", change.NpcId);
                         }
                     }
                 }
             }
     
-            // 6. 更新交互计数和紧张度（与正常流程一致，不受NeedsStateChange限制，每次行动都必须递增）
+            // 6. 更新交互计数和紧张度（与正常流程一致，每次行动都必须递增）
             session.InteractionCount++;
             if (directorOutput?.Pacing != null)
             {
@@ -707,7 +713,7 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
                 .UpdateColumns(s => new { s.InteractionCount, s.TensionLevel })
                 .ExecuteCommandAsync();
     
-            // 4. 时段推进（已有 TimeAdvanced 守卫，不受 NeedsStateChange 影响）
+            // 4. 时段推进（已有 TimeAdvanced 守卫）
             if (result.StateChanges?.TimeAdvanced == true)
             {
                 try
@@ -1034,33 +1040,165 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
     }
 
     /// <summary>
-    /// 兼容存量导演输出：当导演未给 item_hints 却仍输出了旧版 acquired_items/consumed_items 时，
-    /// 转换为非权威物资推荐线索，供物资官参考（不落库）。
+    /// 序列化前台导演输出为书记官的既定事实文本（书记官只记录不改写）
     /// </summary>
-    private static List<ItemHintInfo>? BuildLegacyItemHints(DirectorOutput directorOutput)
+    private static string BuildDirectorFacts(DirectorOutput directorOutput)
     {
-        var hints = new List<ItemHintInfo>();
-        if (directorOutput.AcquiredItems is { Count: > 0 })
+        var sb = new StringBuilder();
+        sb.AppendLine($"场景速写: {directorOutput.NarrativeSeed}");
+
+        if (directorOutput.Beats is { Count: > 0 })
         {
-            hints.AddRange(directorOutput.AcquiredItems.Select(a => new ItemHintInfo
-            {
-                Name = a.ItemName,
-                Category = "物品",
-                Change = "获得",
-                Note = a.Description
-            }));
+            sb.AppendLine("章节分镜:");
+            foreach (var beat in directorOutput.Beats)
+                sb.AppendLine($"- [{beat.BeatType}] {beat.Seed}");
         }
-        if (directorOutput.ConsumedItems is { Count: > 0 })
+
+        if (directorOutput.NpcActions is { Count: > 0 })
         {
-            hints.AddRange(directorOutput.ConsumedItems.Select(c => new ItemHintInfo
+            sb.AppendLine("NPC行为:");
+            foreach (var npcAction in directorOutput.NpcActions)
             {
-                Name = c.ItemName,
-                Category = "物品",
-                Change = "消耗",
-                Note = c.Reason
-            }));
+                var surface = npcAction.DialogueDirection?.Surface;
+                sb.AppendLine(string.IsNullOrEmpty(surface)
+                    ? $"- {npcAction.NpcId}: {npcAction.Action}"
+                    : $"- {npcAction.NpcId}: {npcAction.Action}｜台词大意: {surface}");
+            }
         }
-        return hints.Count > 0 ? hints : null;
+
+        if (directorOutput.NarrativeHooks is { Count: > 0 })
+            sb.AppendLine($"引导线索: {string.Join("；", directorOutput.NarrativeHooks)}");
+
+        if (directorOutput.Pacing != null)
+            sb.AppendLine($"紧张度: {directorOutput.Pacing.TensionLevel}/10 {directorOutput.Pacing.Note}");
+
+        sb.AppendLine($"本轮时段推进: {(directorOutput.TimeAdvance ? "是" : "否")}");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 书记官后台记账Task：独立DI scope执行（防调用方scope提前销毁），
+    /// 完成后回填 result 的 ScribeOutput/ItemHints/SuggestedActions/StateChanges；内部自捕异常永不抛。
+    /// dryRun=true 时不落库，仅回填字段（供预计算缓存后回放时再落库）。
+    /// </summary>
+    private Task RunScribeTaskAsync(long sessionId, GameActionResult result, ScribeInput scribeInput, int applyRound, bool dryRun, List<GameNpcProfile> npcs)
+    {
+        return Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var scribe = scope.ServiceProvider.GetRequiredService<ScribeAiService>();
+                var output = await scribe.ScribeAsync(scribeInput, sessionId);
+                if (output == null)
+                    return; // 重试后仍失败：本轮状态不变，叙事不中断（ScribeAiService已记error日志）
+
+                result.ScribeOutput = output;
+                result.ItemHints = output.ItemHints;
+                result.SuggestedActions = output.SuggestedActions;
+
+                // 选项粒度统一打标：同一节奏档下书记官产出的两个选项必然同粒度，
+                // 由代码层依 IsKeyMoment 回填（不让AI输出，避免幻觉）。
+                // 粗粒度(advance)选项被点选后，导演将收到[推进型行动]标记并强制走章节档大幅推演。
+                if (result.SuggestedActions is { Count: > 0 })
+                {
+                    var scale = scribeInput.IsKeyMoment ? ActionScales.Detail : ActionScales.Advance;
+                    foreach (var sa in result.SuggestedActions)
+                        sa.Scale = scale;
+                }
+
+                if (DebugEnabled && output.ItemHints is { Count: > 0 })
+                    AiDebugLogger.LogOrchestration("物资推荐", string.Join("; ", output.ItemHints.Select(h => $"{h.Change}·{h.Category}:{h.Name}")));
+
+                // 应用世界状态变更（沿用递增前的轮次，与旧串行流程一致）
+                // 轻量模式(SuggestionsOnly)不落库：纯叙事轮只取建议选项，即便模型幻觉产出状态也强制忽略
+                if (output.WorldStateChanges != null && !scribeInput.SuggestionsOnly)
+                {
+                    if (!dryRun)
+                    {
+                        var worldState = scope.ServiceProvider.GetRequiredService<WorldStateService>();
+                        await worldState.ApplyChangesAsync(sessionId, output.WorldStateChanges, applyRound);
+                    }
+
+                    // 任务进度变化时回填，供Hub推送前端更新支线任务状态
+                    if (output.WorldStateChanges.QuestProgress != null && result.StateChanges != null)
+                    {
+                        result.StateChanges.QuestProgress = output.WorldStateChanges.QuestProgress;
+                    }
+                }
+
+                // 更新NPC态度（书记官依既定事实判定变化量）；轻量模式不落库
+                if (output.NpcAttitudeChanges is { Count: > 0 } && !scribeInput.SuggestionsOnly && result.StateChanges != null)
+                {
+                    var npcService = scope.ServiceProvider.GetRequiredService<NpcService>();
+                    result.StateChanges.NpcAttitudeChanges = new Dictionary<string, int>();
+                    foreach (var change in output.NpcAttitudeChanges.Where(c => c.Change != 0))
+                    {
+                        var npc = npcs.FirstOrDefault(n => n.NpcIdentifier == change.NpcId);
+                        if (npc == null) continue;
+                        if (!dryRun)
+                        {
+                            await npcService.UpdateAttitudeAsync(sessionId, npc.Id, change.Change);
+                        }
+                        result.StateChanges.NpcAttitudeChanges[change.NpcId] = change.Change;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "书记官记账Task异常，本轮状态不变: SessionId={SessionId}", sessionId);
+            }
+        });
+    }
+
+    /// <summary>
+    /// 装配“仅产出建议选项”的书记官轻量输入（SuggestionsOnly=true）。
+    /// 用于开场类场景（首次进入/重新开始/同题异卷重玩）与不可行短路补救：
+    /// 以给定文本（开场叙事或拒绝叙事）作为[本轮既定事实]，复用 scribe_suggestions_system 提示词产出2个引导选项。
+    /// </summary>
+    private async Task<ScribeInput> BuildSuggestionsOnlyInputAsync(long sessionId, string playerAction, string directorFacts, string characterName)
+    {
+        var session = await _sessionRep.GetFirstAsync(s => s.Id == sessionId);
+        var worldState = await _worldState.GetCurrentStateForDirectorAsync(sessionId);
+        var npcs = await _npcService.GetCriticalNpcsAsync(sessionId);
+        return new ScribeInput
+        {
+            PlayerAction = playerAction,
+            ActionIntent = null,
+            JudgmentOutcome = null,
+            DirectorFacts = directorFacts,
+            WorldState = worldState,
+            NpcProfiles = BuildNpcProfilesText(npcs),
+            PlayerInventory = await BuildPlayerInventoryText(sessionId),
+            // 开场/补救场景保留主线目标以引导选项朝主线推进（新手引导）；不暴露支线/隐藏内容避免剧透
+            MainQuestProgress = session?.MainQuest ?? "",
+            SideQuestList = "",
+            HiddenContentList = "",
+            CharacterName = characterName,
+            SuggestionsOnly = true
+        };
+    }
+
+    /// <summary>
+    /// 生成“仅建议选项”（轻量模式，不记账不落库）。供 Hub 在开场叙事推送后调用，
+    /// 为首次进入/重新开始/同题异卷重玩补齐行动选项（新手引导 + UX 一致性）。
+    /// 失败时返回 null，调用方降级为无选项（不阻断副本启动）。
+    /// </summary>
+    public async Task<List<SuggestedActionInfo>?> GenerateSuggestionsOnlyAsync(long sessionId, string playerAction, string directorFacts, string characterName)
+    {
+        try
+        {
+            var scribeInput = await BuildSuggestionsOnlyInputAsync(sessionId, playerAction, directorFacts, characterName);
+            using var scope = _scopeFactory.CreateScope();
+            var scribe = scope.ServiceProvider.GetRequiredService<ScribeAiService>();
+            var output = await scribe.ScribeAsync(scribeInput, sessionId);
+            return output?.SuggestedActions;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "轻量建议选项生成失败(非致命): SessionId={SessionId}", sessionId);
+            return null;
+        }
     }
 
     private async Task<List<NpcLanguageCardDto>> BuildNpcLanguageCardsForScene(long sessionId, DirectorOutput directorOutput)
@@ -1248,6 +1386,13 @@ public class ProcessActionInput
     public bool IsAdultMode { get; set; }
     /// <summary>干跑模式（预计算用，跳过所有DB写入但完整执行AI管线）</summary>
     public bool DryRun { get; set; }
+
+    /// <summary>
+    /// 本次行动的粒度（来自被点选选项的 SuggestedActionInfo.Scale）：
+    /// ActionScales.Advance 时向导演注入[推进型行动]标记，强制章节档大幅推演；
+    /// 玩家自由输入的行动不带此标记（默认 detail）。
+    /// </summary>
+    public string ActionScale { get; set; } = ActionScales.Detail;
 
     /// <summary>
     /// 骰子掷出后的即时回调（用于在导演AI推演期间提前推送骰子结果给前端展示）

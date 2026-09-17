@@ -135,6 +135,26 @@ public class SuggestedActionInfo
     /// <summary>方向提示（如"社交互动方向"、"潜行探索方向"）</summary>
     [JsonProperty("hint")]
     public string Hint { get; set; } = "";
+
+    /// <summary>
+    /// 选项粒度（由代码层依书记官本轮节奏档统一打标，非AI输出）：
+    /// detail=细粒度即时行动；advance=粗粒度剧情推进型（点选后导演强制走章节档大幅推演）。
+    /// 随 LastSuggestedActions 持久化，供点选时反查。
+    /// </summary>
+    [JsonProperty("scale")]
+    public string Scale { get; set; } = ActionScales.Detail;
+}
+
+/// <summary>
+/// 行动粒度常量（选项节奏双档机制）
+/// </summary>
+public static class ActionScales
+{
+    /// <summary>细粒度：关键时刻的即时行动（默认）</summary>
+    public const string Detail = "detail";
+
+    /// <summary>粗粒度：剧情推进型行动，导演需一次性大幅推演</summary>
+    public const string Advance = "advance";
 }
 
 /// <summary>

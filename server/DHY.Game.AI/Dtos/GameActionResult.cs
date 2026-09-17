@@ -26,9 +26,6 @@ public class GameActionResult
     /// <summary>导演AI建议的行动选项（供前端显示快速选择按钮）</summary>
     public List<SuggestedActionInfo>? SuggestedActions { get; set; }
 
-    /// <summary>分类AI判定是否需要状态变更（缓存命中回放时用于守卫持久化）</summary>
-    public bool NeedsStateChange { get; set; }
-
     /// <summary>导演蓝图物资清单（权威事实基准，供物资官逐条记账落库）</summary>
     public List<ItemHintInfo>? ItemHints { get; set; }
 
@@ -37,6 +34,22 @@ public class GameActionResult
 
     /// <summary>可行性三态：feasible / uncertain / infeasible（供三态分流：infeasible 短路拒绝）</summary>
     public string? Feasibility { get; set; }
+
+    /// <summary>
+    /// 是否命中不可行短路（分类AI明确判 infeasible 并拒绝）。
+    /// 预计算标记选项"无法执行"的唯一依据；导演解析失败/流程中断的兜底结果 Feasibility 为 null，不得混同。
+    /// </summary>
+    public bool IsInfeasibleShortCircuit => string.Equals(Feasibility, "infeasible", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>书记官记账输出（书记官Task完成后回填；缓存回放时用于应用状态变更与NPC态度）</summary>
+    public ScribeOutput? ScribeOutput { get; set; }
+
+    /// <summary>
+    /// 书记官后台记账Task（与叙事流式并行）。
+    /// 完成后回填 ScribeOutput/ItemHints/SuggestedActions/StateChanges；内部自捕异常永不抛。
+    /// Hub在读取上述字段前必须 await 此Task；预计算缓存前必须 await 并置 null。
+    /// </summary>
+    public Task? ScribeTask { get; set; }
 }
 
 /// <summary>

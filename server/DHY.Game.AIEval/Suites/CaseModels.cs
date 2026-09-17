@@ -65,11 +65,9 @@ public class DirectorInputCase
     public string NpcProfiles { get; set; } = "";
     public string MainQuestProgress { get; set; } = "";
     public string PlayerInventory { get; set; } = "";
-    public bool IsRoutine { get; set; }
     public string CharacterName { get; set; } = "";
     /// <summary>判定结果文本（null=无需检定）</summary>
     public string? JudgmentOutcome { get; set; }
-    public bool NeedsStateChange { get; set; }
     public string SideQuestList { get; set; } = "";
     public string HiddenContentList { get; set; } = "";
 }

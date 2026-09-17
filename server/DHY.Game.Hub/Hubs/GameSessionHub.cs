@@ -225,7 +225,10 @@ public class GameSessionHub : Hub<IGameSessionHub>
             // 4. 注册活跃会话
             _sessionManager.SetActiveSession(userId, result.SessionId);
 
-            // 5. 流式推送开场叙事
+            // 5. 流式推送开场叙事（仅限新建副本）
+            //    恢复副本时跳过旁白推送，直接续上离开前最后一轮叙事（方案A）：
+            //    历史叙事由前端 Lobby.resumeDungeon 从 checkActiveSession HTTP 接口预先恢复；
+            //    Hub 仅负责在 DungeonReady 后补推离开前的建议行动选项。
             if (!result.IsResumed)
             {
                 // 新建副本：先推送场景转换分割线
@@ -236,8 +239,8 @@ public class GameSessionHub : Hub<IGameSessionHub>
                     IsLast = true,
                     Timestamp = DateTime.Now
                 });
+                await broadcast.StreamNarrativeAsync(userId, result.OpeningNarrative, "narrative");
             }
-            await broadcast.StreamNarrativeAsync(userId, result.OpeningNarrative, "narrative");
 
             // 6. 查询session构建游戏状态
             var session = await sessionRep.GetFirstAsync(s => s.Id == result.SessionId);
@@ -268,6 +271,106 @@ public class GameSessionHub : Hub<IGameSessionHub>
                 },
                 GameState = gameState
             });
+
+            // ★ 8. 恢复副本：推送离开前最后一轮的建议行动选项（方案A：续上离开前一刻）
+            //    仅以文本推送（IsComputing=false、IsFeasible默认true），不重跑预计算（省token）：
+            //    玩家点选后服务端 ProcessSelectCachedActionAsync 自动分流：
+            //      内存缓存命中（1天TTL）→秒响应；未命中→以 ActionText 走常规全链路。
+            if (result.IsResumed && !string.IsNullOrEmpty(session?.LastSuggestedActions))
+            {
+                try
+                {
+                    var restoredOptions = JsonConvert.DeserializeObject<List<SuggestedActionInfo>>(session!.LastSuggestedActions!);
+                    if (restoredOptions != null && restoredOptions.Count >= 2)
+                    {
+                        var optionDtos = restoredOptions.Take(2).Select((sa, i) => new SuggestedActionOptionDto
+                        {
+                            Index = i,
+                            ActionText = sa.ActionText,
+                            Hint = sa.Hint,
+                            // 恢复路径不预置可行性：前端默认可点，点选后服务端根据实际缓存状态分流
+                            IsFeasible = true
+                        }).ToList();
+
+                        // 埋点①重置：以当前时刻作为选项推送时刻（供后续思考间隔统计）
+                        _precomputeService.MarkOptionsShown(result.SessionId);
+
+                        await hubContext.Clients.Client(connectionId).ReceiveSuggestedActions(new SuggestedActionsDto
+                        {
+                            Options = optionDtos,
+                            IsComputing = false
+                        });
+                    }
+                }
+                catch (Exception restoreEx)
+                {
+                    _logger.LogWarning(restoreEx, "恢复副本时反序列化 LastSuggestedActions 失败(非致命): SessionId={SessionId}", result.SessionId);
+                }
+            }
+
+            // ★ 9. 新建副本（首次进入/同题异卷重玩）：生成开场行动选项（方案C-1，复用书记官轻量模式）
+            //    开场叙事作为[本轮既定事实]，书记官 SuggestionsOnly 产出2个引导选项（新手引导 + UX 一致性）。
+            //    与常规轮一致：持久化 LastSuggestedActions + 启动预计算 + 推送选项（预计算未完成时先显示加载态）。
+            if (!result.IsResumed && character != null)
+            {
+                try
+                {
+                    var openingOptions = await aiCoordinator.GenerateSuggestionsOnlyAsync(
+                        result.SessionId, "[副本开场]", result.OpeningNarrative, input.CharacterName);
+                    if (openingOptions != null && openingOptions.Count >= 2)
+                    {
+                        var optionsToCompute = openingOptions.Take(2).ToList();
+
+                        // 持久化选项文本（挂起/断线恢复时可继续显示按钮）
+                        if (session != null)
+                        {
+                            session.LastSuggestedActions = JsonConvert.SerializeObject(optionsToCompute);
+                            await sessionRep.AsUpdateable(session)
+                                .UpdateColumns(s => new { s.LastSuggestedActions })
+                                .ExecuteCommandAsync();
+                        }
+
+                        // 启动预计算（玩家点选时秒响应；与常规轮 ledgerTask 内的预计算一致）
+                        var precomputeTask = _precomputeService.PrecomputeAsync(result.SessionId, optionsToCompute);
+                        var optionDtos = optionsToCompute.Select((sa, i) => new SuggestedActionOptionDto
+                        {
+                            Index = i,
+                            ActionText = sa.ActionText,
+                            Hint = sa.Hint
+                        }).ToList();
+
+                        var alreadyReady = precomputeTask.IsCompleted;
+                        _precomputeService.MarkOptionsShown(result.SessionId);
+                        await hubContext.Clients.Client(connectionId).ReceiveSuggestedActions(new SuggestedActionsDto
+                        {
+                            Options = alreadyReady ? ApplyFeasibility(result.SessionId, optionDtos) : optionDtos,
+                            IsComputing = !alreadyReady
+                        });
+
+                        // 预计算尚未完成时，等其结束后再通知前端 IsComputing=false（并回填可行性）
+                        if (!alreadyReady)
+                        {
+                            _ = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    await precomputeTask;
+                                    await hubContext.Clients.Client(connectionId).ReceiveSuggestedActions(new SuggestedActionsDto
+                                    {
+                                        Options = ApplyFeasibility(result.SessionId, optionDtos),
+                                        IsComputing = false
+                                    });
+                                }
+                                catch { /* 预计算失败，按钮保持禁用，玩家可手动输入 */ }
+                            });
+                        }
+                    }
+                }
+                catch (Exception openingEx)
+                {
+                    _logger.LogWarning(openingEx, "开场选项生成失败(非致命): SessionId={SessionId}", result.SessionId);
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -329,6 +432,9 @@ public class GameSessionHub : Hub<IGameSessionHub>
         var quartermaster = scope.ServiceProvider.GetRequiredService<QuartermasterAiService>();
         var knownAssetService = scope.ServiceProvider.GetRequiredService<KnownAssetService>();
 
+        // 后台记账链句柄（物资官记账→推送→启动预计算），与叙事流式并行执行；finally中兜底等待，防止scope提前销毁
+        Task<Task?>? ledgerTask = null;
+
         try
         {
             // 0. 清除预计算缓存（玩家发起新行动，旧缓存失效）
@@ -360,6 +466,8 @@ public class GameSessionHub : Hub<IGameSessionHub>
                 SessionId = input.SessionId,
                 ActionText = input.ActionText,
                 IsAdultMode = input.IsAdultMode,
+                // 粒度透传：仅粗粒度选项回退路径会为 advance，玩家自由输入永远是 detail
+                ActionScale = input.ActionScale,
                 // 骰子掷出后立即推送结果给前端，让玩家在导演AI推演期间看到判定详情
                 OnDiceRolled = dice =>
                 {
@@ -381,9 +489,6 @@ public class GameSessionHub : Hub<IGameSessionHub>
             };
             var result = await aiCoordinator.ProcessPlayerActionAsync(processInput);
 
-            // 预计算在记账落库后、叙事流式前启动（见步骤2.8），与叙事并行且其分类AI能读到本轮最新账本。
-            Task? precomputeTask = null;
-
             // 2. 若有骰子判定 → 推送
             if (result.DiceResult != null)
             {
@@ -403,81 +508,118 @@ public class GameSessionHub : Hub<IGameSessionHub>
                 });
             }
 
-            // 2.5 依导演蓝图记账落库（导演后、叙事前）：物资官把 item_hints 逐条扩展为完整数值权威入账。
-            //     门控：导演是资产变更的唯一来源，无 item_hints（纯对话/观察轮）即跳过。
+            // 2.5 后台记账链：书记官记账 → 物资官记账 → 背包/情报推送 → 启动下一轮预计算，整链与步骤3叙事流式并行。
+            //     叙事的PlayerInventory在协调器内记账前已构建，对记账结果无依赖，可安全并行。
+            //     链首先 await 书记官Task（ItemHints/SuggestedActions/StateChanges由其回填）；
+            //     门控：书记官是资产变更的唯一来源，无 item_hints（纯对话/观察轮）即跳过物资官记账。
             var session = await sessionRep.GetFirstAsync(s => s.Id == input.SessionId);
             var character = await characterRep.GetFirstAsync(c => c.SessionId == input.SessionId);
-            LedgerDelta? ledgerDelta = null;
-            if (result.ItemHints is { Count: > 0 })
+            ledgerTask = Task.Run(async () =>
             {
                 try
                 {
-                    ledgerDelta = await quartermaster.RecordFromBlueprintAsync(
-                        input.SessionId,
-                        result.ActionIntent ?? input.ActionText,
-                        BuildItemHintsText(result.ItemHints),
-                        await BuildLedgerText(inventoryService, knownAssetService, input.SessionId),
-                        session?.InteractionCount ?? 0,
-                        result.ItemHints);
+                    // 书记官记账（与叙事并行）：落库world_state_changes/NPC态度，回填ItemHints/SuggestedActions
+                    if (result.ScribeTask != null)
+                    {
+                        await result.ScribeTask;
+                    }
+
+                    LedgerDelta? ledgerDelta = null;
+                    if (result.ItemHints is { Count: > 0 })
+                    {
+                        try
+                        {
+                            ledgerDelta = await quartermaster.RecordFromBlueprintAsync(
+                                input.SessionId,
+                                result.ActionIntent ?? input.ActionText,
+                                BuildItemHintsText(result.ItemHints),
+                                await BuildLedgerText(inventoryService, knownAssetService, input.SessionId),
+                                session?.InteractionCount ?? 0,
+                                result.ItemHints);
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogWarning(ex, "道具AI记账失败: SessionId={SessionId}", input.SessionId);
+                        }
+                    }
+
+                    // 记账产生物理道具变更 → 推送背包更新（在叙事流式期间到达前端）
+                    var hasPhysicalChange = ledgerDelta != null &&
+                        ((ledgerDelta.AcquiredItems is { Count: > 0 }) ||
+                         (ledgerDelta.ConsumedItems is { Count: > 0 }) ||
+                         (ledgerDelta.LostItems is { Count: > 0 }));
+                    if (hasPhysicalChange && character != null)
+                    {
+                        var backpack = await inventoryService.GetBackpackAsync(new SessionIdInput { SessionId = input.SessionId });
+                        await hubContext.Clients.Client(connectionId).UpdateInventory(new InventoryUpdateDto
+                        {
+                            Items = backpack.Items.Select(i => new InventoryItemDto
+                            {
+                                Id = i.Id,
+                                ItemName = i.ItemName,
+                                ItemType = i.ItemType,
+                                Description = i.Description,
+                                Weight = i.Weight,
+                                AttributeBonus = i.AttributeBonus,
+                                LinkedAttribute = i.LinkedAttribute,
+                                MaxUses = i.MaxUses,
+                                CurrentUses = i.CurrentUses,
+                                IsUnlimited = i.IsUnlimited,
+                                IsEquipped = i.IsEquipped,
+                                IsKeyItem = i.IsKeyItem,
+                                Quantity = i.Quantity
+                            }).ToList(),
+                            CurrentWeight = backpack.CurrentWeight,
+                            MaxWeight = backpack.MaxWeight,
+                            WeightPercent = backpack.WeightPercent,
+                            IsOverloaded = backpack.IsOverloaded,
+                            IsEncumbered = backpack.IsEncumbered,
+                            EquippedWeaponId = character.EquippedWeaponId,
+                            EquippedArmorId = character.EquippedArmorId
+                        });
+                    }
+
+                    // 记账产生无形情报变更 → 推送已知情报更新
+                    var hasInfoChange = ledgerDelta != null &&
+                        ((ledgerDelta.AcquiredInfo is { Count: > 0 }) || (ledgerDelta.InvalidatedInfo is { Count: > 0 }));
+                    if (hasInfoChange)
+                    {
+                        await PushKnownAssetsAsync(hubContext, knownAssetService, connectionId, input.SessionId);
+                    }
+
+                    // 记账完成后启动下一轮预计算（保证其分类AI读到本轮最新账本）
+                    if (result.SuggestedActions != null && result.SuggestedActions.Count >= 2 && !(result.NarrativeInput?.IsAdult ?? false))
+                    {
+                        var optionsToCompute = result.SuggestedActions.Take(2).ToList();
+
+                        // 持久化选项文本到 session.LastSuggestedActions：
+                        // 副本挂起/断线恢复时前端可继续显示按钮；缓存命中走秒响应，未命中以文本走常规全链路
+                        if (session != null)
+                        {
+                            try
+                            {
+                                session.LastSuggestedActions = JsonConvert.SerializeObject(optionsToCompute);
+                                await sessionRep.AsUpdateable(session)
+                                    .UpdateColumns(s => new { s.LastSuggestedActions })
+                                    .ExecuteCommandAsync();
+                            }
+                            catch (Exception persistEx)
+                            {
+                                logger.LogWarning(persistEx, "持久化 LastSuggestedActions 失败(非致命): SessionId={SessionId}", input.SessionId);
+                            }
+                        }
+
+                        return (Task?)Task.Run(() => _precomputeService.PrecomputeAsync(input.SessionId, optionsToCompute));
+                    }
                 }
                 catch (Exception ex)
                 {
-                    logger.LogWarning(ex, "道具AI记账失败: SessionId={SessionId}", input.SessionId);
+                    logger.LogWarning(ex, "后台记账链执行失败: SessionId={SessionId}", input.SessionId);
                 }
-            }
+                return null;
+            });
 
-            // 2.6 记账产生物理道具变更 → 背包在叙事前即刷新
-            var hasPhysicalChange = ledgerDelta != null &&
-                ((ledgerDelta.AcquiredItems is { Count: > 0 }) ||
-                 (ledgerDelta.ConsumedItems is { Count: > 0 }) ||
-                 (ledgerDelta.LostItems is { Count: > 0 }));
-            if (hasPhysicalChange && character != null)
-            {
-                var backpack = await inventoryService.GetBackpackAsync(new SessionIdInput { SessionId = input.SessionId });
-                await hubContext.Clients.Client(connectionId).UpdateInventory(new InventoryUpdateDto
-                {
-                    Items = backpack.Items.Select(i => new InventoryItemDto
-                    {
-                        Id = i.Id,
-                        ItemName = i.ItemName,
-                        ItemType = i.ItemType,
-                        Description = i.Description,
-                        Weight = i.Weight,
-                        AttributeBonus = i.AttributeBonus,
-                        LinkedAttribute = i.LinkedAttribute,
-                        MaxUses = i.MaxUses,
-                        CurrentUses = i.CurrentUses,
-                        IsUnlimited = i.IsUnlimited,
-                        IsEquipped = i.IsEquipped,
-                        IsKeyItem = i.IsKeyItem,
-                        Quantity = i.Quantity
-                    }).ToList(),
-                    CurrentWeight = backpack.CurrentWeight,
-                    MaxWeight = backpack.MaxWeight,
-                    WeightPercent = backpack.WeightPercent,
-                    IsOverloaded = backpack.IsOverloaded,
-                    IsEncumbered = backpack.IsEncumbered,
-                    EquippedWeaponId = character.EquippedWeaponId,
-                    EquippedArmorId = character.EquippedArmorId
-                });
-            }
-
-            // 2.7 记账产生无形情报变更 → 推送已知情报更新
-            var hasInfoChange = ledgerDelta != null &&
-                ((ledgerDelta.AcquiredInfo is { Count: > 0 }) || (ledgerDelta.InvalidatedInfo is { Count: > 0 }));
-            if (hasInfoChange)
-            {
-                await PushKnownAssetsAsync(hubContext, knownAssetService, connectionId, input.SessionId);
-            }
-
-            // 2.8 记账完成后立即启动下一轮预计算（其分类AI读到本轮最新账本），与随后的叙事流式并行
-            if (result.SuggestedActions != null && result.SuggestedActions.Count >= 2 && !(result.NarrativeInput?.IsAdult ?? false))
-            {
-                var optionsToCompute = result.SuggestedActions.Take(2).ToList();
-                precomputeTask = Task.Run(() => _precomputeService.PrecomputeAsync(input.SessionId, optionsToCompute));
-            }
-
-            // 3. 流式推送叙事（真流式：AI生成token实时推送到客户端）
+            // 3. 流式推送叙事（真流式：AI生成token实时推送到客户端，与后台记账链并行）
             string narrativeText = result.Narrative;
             if (result.NarrativeInput != null && session != null)
             {
@@ -496,6 +638,17 @@ public class GameSessionHub : Hub<IGameSessionHub>
                     IsAdult = result.NarrativeInput.IsAdult
                 }).ExecuteCommandAsync();
             }
+            else if (!string.IsNullOrEmpty(result.Narrative))
+            {
+                // 不可行短路：拒绝叙事已在协调器内记录日志，此处仅推送文本
+                // （与缓存路径 ProcessSelectCachedActionAsync 对齐，修复此前 PlayerAction 路径短路无反馈的缺陷）
+                narrativeText = result.Narrative;
+                await broadcast.StreamNarrativeAsync(userId, narrativeText, "narrative");
+            }
+
+            // 3.9 等待后台记账链收尾（通常已在叙事流式期间跑完），取回预计算任务句柄
+            Task? precomputeTask = await ledgerTask;
+            ledgerTask = null;
 
             // 4. 推送游戏状态更新
             if (session != null && character != null)
@@ -567,7 +720,7 @@ public class GameSessionHub : Hub<IGameSessionHub>
                 Timestamp = DateTime.Now
             });
 
-            // 9. 推送建议行动选项（预计算已在步骤2.8与叙事流式并行启动）
+            // 9. 推送建议行动选项（预计算已在步骤2.5记账链中与叙事流式并行启动）
             if (precomputeTask != null && result.SuggestedActions != null)
             {
                 var optionDtos = result.SuggestedActions.Take(2).Select((sa, i) => new SuggestedActionOptionDto
@@ -579,6 +732,7 @@ public class GameSessionHub : Hub<IGameSessionHub>
 
                 // 若预计算已在阅读期间跑完，则按钮直接可点；否则先显示加载态
                 var alreadyReady = precomputeTask.IsCompleted;
+                _precomputeService.MarkOptionsShown(input.SessionId); // 埋点①：记录选项推送时刻
                 await hubContext.Clients.Client(connectionId).ReceiveSuggestedActions(new SuggestedActionsDto
                 {
                     Options = alreadyReady ? ApplyFeasibility(input.SessionId, optionDtos) : optionDtos,
@@ -620,6 +774,14 @@ public class GameSessionHub : Hub<IGameSessionHub>
                 Message = "enable",
                 Timestamp = DateTime.Now
             });
+        }
+        finally
+        {
+            // 叙事异常中断时，确保后台记账链在scope销毁前跑完（链内已自行捕获异常）
+            if (ledgerTask != null)
+            {
+                try { await ledgerTask; } catch { /* 已在链内记录 */ }
+            }
         }
     }
 
@@ -747,6 +909,35 @@ public class GameSessionHub : Hub<IGameSessionHub>
     }
 
     /// <summary>
+    /// 从已持久化的 session.LastSuggestedActions 按索引反查选项粒度。
+    /// 用于内存预计算缓存已丢（服务重启/挂起恢复）但玩家仍点选选项的回退场景：
+    /// 粗粒度推进选项不能因缓存丢失而退化成普通行动。任何异常或缺失均回退 detail。
+    /// </summary>
+    private static async Task<string> ResolveScaleFromSessionAsync(
+        SqlSugarRepository<GameDungeonSession> sessionRep, long sessionId, int optionIndex, ILogger logger)
+    {
+        try
+        {
+            var session = await sessionRep.GetFirstAsync(s => s.Id == sessionId);
+            if (string.IsNullOrEmpty(session?.LastSuggestedActions))
+                return ActionScales.Detail;
+
+            var options = JsonConvert.DeserializeObject<List<SuggestedActionInfo>>(session.LastSuggestedActions!);
+            if (options == null || optionIndex < 0 || optionIndex >= options.Count)
+                return ActionScales.Detail;
+
+            return string.IsNullOrWhiteSpace(options[optionIndex].Scale)
+                ? ActionScales.Detail
+                : options[optionIndex].Scale;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "反查选项粒度失败(非致命，按detail处理): SessionId={SessionId}, Index={Index}", sessionId, optionIndex);
+            return ActionScales.Detail;
+        }
+    }
+
+    /// <summary>
     /// 后台处理缓存行动选择，应用缓存结果并持久化
     /// </summary>
     private async Task ProcessSelectCachedActionAsync(long userId, string connectionId, SelectCachedActionInput input)
@@ -763,6 +954,9 @@ public class GameSessionHub : Hub<IGameSessionHub>
         var inventoryService = scope.ServiceProvider.GetRequiredService<InventoryService>();
         var quartermaster = scope.ServiceProvider.GetRequiredService<QuartermasterAiService>();
         var knownAssetService = scope.ServiceProvider.GetRequiredService<KnownAssetService>();
+
+        // 后台记账链句柄（物资官记账→推送→启动预计算），与叙事回放并行执行；finally中兜底等待，防止scope提前销毁
+        Task<Task?>? ledgerTask = null;
 
         try
         {
@@ -787,6 +981,12 @@ public class GameSessionHub : Hub<IGameSessionHub>
             }
 
             // 1. 从缓存获取预计算结果
+            // 埋点①：玩家思考间隔 = 点击时刻 - 选项推送时刻（须在 InvalidateCache 前读取）
+            var optionsShownAt = _precomputeService.GetOptionsShownAt(input.SessionId);
+            if (optionsShownAt != null)
+                logger.LogInformation("玩家思考间隔: SessionId={SessionId}, Index={Index}, 间隔ms={Interval}",
+                    input.SessionId, input.OptionIndex, (long)(DateTime.Now - optionsShownAt.Value).TotalMilliseconds);
+
             var cached = _precomputeService.GetCachedResult(input.SessionId, input.OptionIndex);
             if (cached?.Result == null)
             {
@@ -822,7 +1022,11 @@ public class GameSessionHub : Hub<IGameSessionHub>
                 {
                     SessionId = input.SessionId,
                     ActionText = fallbackText,
-                    IsAdultMode = input.IsAdultMode
+                    IsAdultMode = input.IsAdultMode,
+                    // 粒度不能丢：粗粒度推进选项回退常规流程时仍需让导演走章节档。
+                    // 缓存尚在时直取；缓存已丢（如服务重启）则从已持久化的 LastSuggestedActions 按索引反查。
+                    ActionScale = cached?.Scale
+                        ?? await ResolveScaleFromSessionAsync(sessionRep, input.SessionId, input.OptionIndex, logger)
                 };
                 await ProcessPlayerActionAsync(userId, connectionId, fallbackInput);
                 return;
@@ -850,108 +1054,144 @@ public class GameSessionHub : Hub<IGameSessionHub>
                 });
             }
 
-            // 3. 持久化状态变更（通过AiCoordinatorService应用预计算结果到数据库）
-            await aiCoordinator.ApplyCachedActionResultAsync(input.SessionId, result, actionText);
-            var session = await sessionRep.GetFirstAsync(s => s.Id == input.SessionId);
-            var characterForState = await characterRep.GetFirstAsync(c => c.SessionId == input.SessionId);
+            // 3. 清除当前缓存（越早越好，防重入）。落库/记账/选项构建见下（L1改造后移到 await 书记官之后）。
+            _precomputeService.InvalidateCache(input.SessionId);
 
-            // 3.5 依导演蓝图记账落库（回放叙事之前，与真实行动路径一致）：
-            //     缓存结果含导演 item_hints（预计算DryRun未落库），选中提交时才由物资官权威入账。
-            LedgerDelta? ledgerDelta = null;
-            if (result.ItemHints is { Count: > 0 })
+            // 3.5 后台链：await书记官回填 → 落库 → 物资官记账 → 背包/情报推送 → 启动下一轮预计算。
+            //     【L1改造】预计算只跑到导演层、未 await 书记官，故链首 await result.ScribeTask 回填
+            //     ScribeOutput/ItemHints/SuggestedActions/QuestProgress，再落库（ApplyCached 依赖 ScribeOutput）。
+            //     书记官自预计算导演完成即 fire-and-forget 启动，点选时大概率已完成，await 基本不阻塞；整链与步骤4叙事并行。
+            ledgerTask = Task.Run(async () =>
             {
                 try
                 {
-                    ledgerDelta = await quartermaster.RecordFromBlueprintAsync(
-                        input.SessionId,
-                        result.ActionIntent ?? actionText,
-                        BuildItemHintsText(result.ItemHints),
-                        await BuildLedgerText(inventoryService, knownAssetService, input.SessionId),
-                        session?.InteractionCount ?? 0,
-                        result.ItemHints);
+                    if (result.ScribeTask != null)
+                        await result.ScribeTask;
+
+                    await aiCoordinator.ApplyCachedActionResultAsync(input.SessionId, result, actionText);
+
+                    var sessionL = await sessionRep.GetFirstAsync(s => s.Id == input.SessionId);
+                    var characterL = await characterRep.GetFirstAsync(c => c.SessionId == input.SessionId);
+
+                    LedgerDelta? ledgerDelta = null;
+                    if (result.ItemHints is { Count: > 0 })
+                    {
+                        try
+                        {
+                            ledgerDelta = await quartermaster.RecordFromBlueprintAsync(
+                                input.SessionId,
+                                result.ActionIntent ?? actionText,
+                                BuildItemHintsText(result.ItemHints),
+                                await BuildLedgerText(inventoryService, knownAssetService, input.SessionId),
+                                sessionL?.InteractionCount ?? 0,
+                                result.ItemHints);
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogWarning(ex, "缓存行动道具AI记账失败: SessionId={SessionId}", input.SessionId);
+                        }
+                    }
+
+                    // 记账产生物理道具变更 → 推送背包更新（在叙事回放期间到达前端）
+                    var hasPhysicalChange = ledgerDelta != null &&
+                        ((ledgerDelta.AcquiredItems is { Count: > 0 }) ||
+                         (ledgerDelta.ConsumedItems is { Count: > 0 }) ||
+                         (ledgerDelta.LostItems is { Count: > 0 }));
+                    if (hasPhysicalChange && characterL != null)
+                    {
+                        var backpack = await inventoryService.GetBackpackAsync(new SessionIdInput { SessionId = input.SessionId });
+                        await hubContext.Clients.Client(connectionId).UpdateInventory(new InventoryUpdateDto
+                        {
+                            Items = backpack.Items.Select(i => new InventoryItemDto
+                            {
+                                Id = i.Id, ItemName = i.ItemName, ItemType = i.ItemType,
+                                Description = i.Description, Weight = i.Weight,
+                                AttributeBonus = i.AttributeBonus, LinkedAttribute = i.LinkedAttribute,
+                                MaxUses = i.MaxUses, CurrentUses = i.CurrentUses,
+                                IsUnlimited = i.IsUnlimited, IsEquipped = i.IsEquipped,
+                                IsKeyItem = i.IsKeyItem, Quantity = i.Quantity
+                            }).ToList(),
+                            CurrentWeight = backpack.CurrentWeight,
+                            MaxWeight = backpack.MaxWeight,
+                            WeightPercent = backpack.WeightPercent,
+                            IsOverloaded = backpack.IsOverloaded,
+                            IsEncumbered = backpack.IsEncumbered,
+                            EquippedWeaponId = characterL.EquippedWeaponId,
+                            EquippedArmorId = characterL.EquippedArmorId
+                        });
+                    }
+
+                    // 记账产生无形情报变更 → 推送已知情报更新
+                    var hasInfoChange = ledgerDelta != null &&
+                        ((ledgerDelta.AcquiredInfo is { Count: > 0 }) || (ledgerDelta.InvalidatedInfo is { Count: > 0 }));
+                    if (hasInfoChange)
+                    {
+                        await PushKnownAssetsAsync(hubContext, knownAssetService, connectionId, input.SessionId);
+                    }
+
+                    // 记账完成后启动下一轮预计算（保证其分类AI读到本轮最新账本）
+                    if (result.SuggestedActions != null && result.SuggestedActions.Count >= 2 && !(result.NarrativeInput?.IsAdult ?? false))
+                    {
+                        var nextOptions = result.SuggestedActions!.Take(2).ToList();
+
+                        // 持久化选项文本到 session.LastSuggestedActions（与 PlayerAction 路径一致）：
+                        // 副本挂起/断线恢复时前端可继续显示按钮；缓存命中走秒响应，未命中以文本走常规全链路
+                        if (sessionL != null)
+                        {
+                            try
+                            {
+                                sessionL.LastSuggestedActions = JsonConvert.SerializeObject(nextOptions);
+                                await sessionRep.AsUpdateable(sessionL)
+                                    .UpdateColumns(s => new { s.LastSuggestedActions })
+                                    .ExecuteCommandAsync();
+                            }
+                            catch (Exception persistEx)
+                            {
+                                logger.LogWarning(persistEx, "持久化 LastSuggestedActions 失败(非致命、缓存路径): SessionId={SessionId}", input.SessionId);
+                            }
+                        }
+
+                        return (Task?)Task.Run(() => _precomputeService.PrecomputeAsync(input.SessionId, nextOptions));
+                    }
                 }
                 catch (Exception ex)
                 {
-                    logger.LogWarning(ex, "缓存行动道具AI记账失败: SessionId={SessionId}", input.SessionId);
+                    logger.LogWarning(ex, "缓存路径后台记账链执行失败: SessionId={SessionId}", input.SessionId);
                 }
-            }
+                return null;
+            });
 
-            // 3.6 记账产生物理道具变更 → 背包在叙事回放前即刷新
-            var hasPhysicalChange = ledgerDelta != null &&
-                ((ledgerDelta.AcquiredItems is { Count: > 0 }) ||
-                 (ledgerDelta.ConsumedItems is { Count: > 0 }) ||
-                 (ledgerDelta.LostItems is { Count: > 0 }));
-            if (hasPhysicalChange && characterForState != null)
-            {
-                var backpack = await inventoryService.GetBackpackAsync(new SessionIdInput { SessionId = input.SessionId });
-                await hubContext.Clients.Client(connectionId).UpdateInventory(new InventoryUpdateDto
-                {
-                    Items = backpack.Items.Select(i => new InventoryItemDto
-                    {
-                        Id = i.Id, ItemName = i.ItemName, ItemType = i.ItemType,
-                        Description = i.Description, Weight = i.Weight,
-                        AttributeBonus = i.AttributeBonus, LinkedAttribute = i.LinkedAttribute,
-                        MaxUses = i.MaxUses, CurrentUses = i.CurrentUses,
-                        IsUnlimited = i.IsUnlimited, IsEquipped = i.IsEquipped,
-                        IsKeyItem = i.IsKeyItem, Quantity = i.Quantity
-                    }).ToList(),
-                    CurrentWeight = backpack.CurrentWeight,
-                    MaxWeight = backpack.MaxWeight,
-                    WeightPercent = backpack.WeightPercent,
-                    IsOverloaded = backpack.IsOverloaded,
-                    IsEncumbered = backpack.IsEncumbered,
-                    EquippedWeaponId = characterForState.EquippedWeaponId,
-                    EquippedArmorId = characterForState.EquippedArmorId
-                });
-            }
-
-            // 3.65 记账产生无形情报变更 → 推送已知情报更新
-            var hasInfoChange = ledgerDelta != null &&
-                ((ledgerDelta.AcquiredInfo is { Count: > 0 }) || (ledgerDelta.InvalidatedInfo is { Count: > 0 }));
-            if (hasInfoChange)
-            {
-                await PushKnownAssetsAsync(hubContext, knownAssetService, connectionId, input.SessionId);
-            }
-
-            // 3.7 清除当前缓存并启动下一轮预计算（其分类AI读到本轮最新账本，与随后的叙事回放并行）
-            _precomputeService.InvalidateCache(input.SessionId);
-            Task? precomputeTask = null;
-            List<SuggestedActionOptionDto>? nextOptionDtos = null;
-            if (result.SuggestedActions != null && result.SuggestedActions.Count >= 2 && !(result.NarrativeInput?.IsAdult ?? false))
-            {
-                var nextOptions = result.SuggestedActions.Take(2).ToList();
-                nextOptionDtos = nextOptions.Select((sa, i) => new SuggestedActionOptionDto
-                {
-                    Index = i,
-                    ActionText = sa.ActionText,
-                    Hint = sa.Hint
-                }).ToList();
-                precomputeTask = Task.Run(() => _precomputeService.PrecomputeAsync(input.SessionId, nextOptions));
-            }
-
-            // 4. 流式推送预生成的叙事文本
-            //    - 非章节档（NextBeatIndex<0）：按标点分块回放完整正文（模拟流式）
-            //    - 章节档（NextBeatIndex>=0）：先回放已预取前缀，再从该索引起实时续写剩余分镜
+            // 4. 【L1改造】叙事实时流式生成（原为回放预生成文本），与后台链并行。
+            //    章节档与非章节档统一走 StreamNarrativeLiveAsync（内部对章节档走分镜流式续写）。
+            //    不可行短路（NarrativeInput=null）时回放拒绝文案，避免界面静默。
             var chunkType = result.DiceResult != null ? "action_result" : "narrative";
             string narrativeText;
-            if (cached.NextBeatIndex >= 0 && result.NarrativeInput != null)
+            if (result.NarrativeInput != null)
             {
-                narrativeText = await broadcast.StreamChapterResumeAsync(
-                    userId, narrativeAi, result.NarrativeInput, cached.NarrativeText, cached.NextBeatIndex, chunkType);
+                narrativeText = await broadcast.StreamNarrativeLiveAsync(
+                    userId, narrativeAi, result.NarrativeInput, input.SessionId, chunkType);
+            }
+            else if (!string.IsNullOrEmpty(result.Narrative))
+            {
+                narrativeText = result.Narrative;
+                await broadcast.StreamNarrativeAsync(userId, narrativeText, chunkType);
             }
             else
             {
-                narrativeText = cached.NarrativeText;
-                // 缓存无预生成正文（如不可行行动短路，NarrativeInput=null）时，回退推送拒绝文案，避免界面静默
-                if (string.IsNullOrEmpty(narrativeText) && !string.IsNullOrEmpty(result.Narrative))
-                    narrativeText = result.Narrative;
-                if (!string.IsNullOrEmpty(narrativeText))
-                    await broadcast.StreamNarrativeAsync(userId, narrativeText, chunkType);
-                else
-                    logger.LogWarning("缓存回放无叙事内容: SessionId={SessionId}, Index={Index}", input.SessionId, input.OptionIndex);
+                narrativeText = "";
+                logger.LogWarning("缓存回放无叙事内容: SessionId={SessionId}, Index={Index}", input.SessionId, input.OptionIndex);
             }
 
-            // 记录叙事日志
+            // 4.9 等待后台链收尾（含 await书记官+落库+记账），取回预计算任务句柄；
+            //     须在恢复输入之前完成，避免玩家新行动与本轮记账竞争
+            Task? precomputeTask = await ledgerTask;
+            ledgerTask = null;
+
+            // 落库后读取会话/角色（供叙事日志与状态推送）
+            var session = await sessionRep.GetFirstAsync(s => s.Id == input.SessionId);
+            var characterForState = await characterRep.GetFirstAsync(c => c.SessionId == input.SessionId);
+
+            // 记录叙事日志（用落库后的 InteractionCount）
             if (!string.IsNullOrEmpty(narrativeText) && session != null)
             {
                 await narrativeLogRep.AsInsertable(new GameNarrativeLog
@@ -963,6 +1203,18 @@ public class GameSessionHub : Hub<IGameSessionHub>
                     Timestamp = DateTime.Now,
                     IsAdult = false
                 }).ExecuteCommandAsync();
+            }
+
+            // 构建下一轮选项DTO（此时 SuggestedActions 已由后台链 await 书记官回填）
+            List<SuggestedActionOptionDto>? nextOptionDtos = null;
+            if (result.SuggestedActions != null && result.SuggestedActions.Count >= 2 && !(result.NarrativeInput?.IsAdult ?? false))
+            {
+                nextOptionDtos = result.SuggestedActions!.Take(2).Select((sa, i) => new SuggestedActionOptionDto
+                {
+                    Index = i,
+                    ActionText = sa.ActionText,
+                    Hint = sa.Hint
+                }).ToList();
             }
 
             // 5. 推送游戏状态更新
@@ -1035,11 +1287,12 @@ public class GameSessionHub : Hub<IGameSessionHub>
                 Timestamp = DateTime.Now
             });
 
-            // 10. 推送建议行动选项（预计算已在步骤3.7与叙事回放并行启动）
+            // 10. 推送建议行动选项（预计算已在步骤3.5记账链中与叙事流式并行启动）
             if (precomputeTask != null && nextOptionDtos != null)
             {
                 // 若预计算已在阅读期间跑完，则按钮直接可点；否则先显示加载态
                 var alreadyReady = precomputeTask.IsCompleted;
+                _precomputeService.MarkOptionsShown(input.SessionId); // 埋点①：记录选项推送时刻
                 await hubContext.Clients.Client(connectionId).ReceiveSuggestedActions(new SuggestedActionsDto
                 {
                     Options = alreadyReady ? ApplyFeasibility(input.SessionId, nextOptionDtos) : nextOptionDtos,
@@ -1082,6 +1335,14 @@ public class GameSessionHub : Hub<IGameSessionHub>
                 Message = "enable",
                 Timestamp = DateTime.Now
             });
+        }
+        finally
+        {
+            // 叙事异常中断时，确保后台记账链在scope销毁前跑完（链内已自行捕获异常）
+            if (ledgerTask != null)
+            {
+                try { await ledgerTask; } catch { /* 已在链内记录 */ }
+            }
         }
     }
 
@@ -1245,12 +1506,16 @@ public class GameSessionHub : Hub<IGameSessionHub>
             var session = await _sessionRep.GetFirstAsync(s => s.Id == sessionId);
             if (session == null) return;
 
-            // 标记会话已放弃
+            // 标记会话已放弃；同时清空 LastSuggestedActions（已结束不再恢复，避免僵尸数据）
             session.Status = 2; // 已放弃
             session.EndTime = DateTime.Now;
+            session.LastSuggestedActions = null;
             await _sessionRep.AsUpdateable(session)
-                .UpdateColumns(s => new { s.Status, s.EndTime })
+                .UpdateColumns(s => new { s.Status, s.EndTime, s.LastSuggestedActions })
                 .ExecuteCommandAsync();
+
+            // 清除预计算内存缓存（避免僵尸选项被其他路径误命中）
+            _precomputeService.InvalidateCache(sessionId);
 
             // 移除活跃会话
             _sessionManager.RemoveActiveSession(userId.Value);
@@ -1399,6 +1664,7 @@ public class GameSessionHub : Hub<IGameSessionHub>
         var broadcast = sp.GetRequiredService<HubBroadcastService>();
         var hubContext = sp.GetRequiredService<IHubContext<GameSessionHub, IGameSessionHub>>();
         var logger = sp.GetRequiredService<ILogger<GameSessionHub>>();
+        var aiCoordinator = sp.GetRequiredService<AiCoordinatorService>();
 
         try
         {
@@ -1499,7 +1765,7 @@ public class GameSessionHub : Hub<IGameSessionHub>
                 })
                 .ExecuteCommandAsync();
 
-            // 6. 重置会话计数器（保留世界设定/主线/支线/隐藏内容/难度参数）
+            // 6. 重置会话计数器（保留世界设定/主线/支线/隐藏内容/难度参数）；同时清空 LastSuggestedActions（新周目不应残留旧选项）
             session.CurrentDay = 1;
             session.CurrentSegment = 0;
             session.TensionLevel = 1;
@@ -1508,12 +1774,17 @@ public class GameSessionHub : Hub<IGameSessionHub>
             session.Status = 0;
             session.StartTime = DateTime.Now;
             session.EndTime = null;
+            session.LastSuggestedActions = null;
             await sessionRep.AsUpdateable(session)
                 .UpdateColumns(s => new {
                     s.CurrentDay, s.CurrentSegment, s.TensionLevel,
-                    s.InteractionCount, s.OvertimeCount, s.Status, s.StartTime, s.EndTime
+                    s.InteractionCount, s.OvertimeCount, s.Status, s.StartTime, s.EndTime,
+                    s.LastSuggestedActions
                 })
                 .ExecuteCommandAsync();
+
+            // 6.5 清除预计算内存缓存（新周目旧缓存已失效）
+            _precomputeService.InvalidateCache(sessionId);
 
             // 7. 重新初始化世界状态（使用结构化局面快照）
             Dictionary<string, object>? worldSettingDict = null;
@@ -1674,6 +1945,62 @@ public class GameSessionHub : Hub<IGameSessionHub>
                 },
                 GameState = gameState
             });
+
+            // ★ 重新开始：生成开场行动选项（方案C-1，复用书记官轻量模式，与首次进入一致）
+            //    保留世界/副本不变，开场叙事作为[本轮既定事实]产出2个引导选项（新手引导 + UX 一致性）。
+            try
+            {
+                var openingOptions = await aiCoordinator.GenerateSuggestionsOnlyAsync(
+                    sessionId, "[副本重新开始]", openingNarrative, character.Name);
+                if (openingOptions != null && openingOptions.Count >= 2)
+                {
+                    var optionsToCompute = openingOptions.Take(2).ToList();
+
+                    // 持久化选项文本（挂起/断线恢复时可继续显示按钮）
+                    session.LastSuggestedActions = JsonConvert.SerializeObject(optionsToCompute);
+                    await sessionRep.AsUpdateable(session)
+                        .UpdateColumns(s => new { s.LastSuggestedActions })
+                        .ExecuteCommandAsync();
+
+                    // 启动预计算（玩家点选时秒响应）
+                    var precomputeTask = _precomputeService.PrecomputeAsync(sessionId, optionsToCompute);
+                    var optionDtos = optionsToCompute.Select((sa, i) => new SuggestedActionOptionDto
+                    {
+                        Index = i,
+                        ActionText = sa.ActionText,
+                        Hint = sa.Hint
+                    }).ToList();
+
+                    var alreadyReady = precomputeTask.IsCompleted;
+                    _precomputeService.MarkOptionsShown(sessionId);
+                    await hubContext.Clients.Client(connectionId).ReceiveSuggestedActions(new SuggestedActionsDto
+                    {
+                        Options = alreadyReady ? ApplyFeasibility(sessionId, optionDtos) : optionDtos,
+                        IsComputing = !alreadyReady
+                    });
+
+                    if (!alreadyReady)
+                    {
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await precomputeTask;
+                                await hubContext.Clients.Client(connectionId).ReceiveSuggestedActions(new SuggestedActionsDto
+                                {
+                                    Options = ApplyFeasibility(sessionId, optionDtos),
+                                    IsComputing = false
+                                });
+                            }
+                            catch { /* 预计算失败，按钮保持禁用，玩家可手动输入 */ }
+                        });
+                    }
+                }
+            }
+            catch (Exception openingEx)
+            {
+                logger.LogWarning(openingEx, "重新开始开场选项生成失败(非致命): SessionId={SessionId}", sessionId);
+            }
         }
         catch (Exception ex)
         {

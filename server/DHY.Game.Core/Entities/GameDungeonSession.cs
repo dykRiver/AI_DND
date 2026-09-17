@@ -119,4 +119,12 @@ public class GameDungeonSession : EntityBase
     /// </summary>
     [SugarColumn(ColumnDescription = "同题异卷标记", DefaultValue = "0")]
     public bool IsReplay { get; set; }
+
+    /// <summary>
+    /// 离开前最后一轮的建议行动选项JSON（书记官每次记账后覆盖写入）。
+    /// 结构：[{action_text, hint}, ...]；用于副本挂起/断线恢复时前端继续显示按钮。
+    /// 缓存命中走秒响应；缓存过期则以文本走常规全链路。
+    /// </summary>
+    [SugarColumn(ColumnDescription = "最后一轮建议行动JSON", ColumnDataType = "nvarchar(max)", IsNullable = true)]
+    public string? LastSuggestedActions { get; set; }
 }
