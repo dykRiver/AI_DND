@@ -14,7 +14,7 @@ import SuggestedActions from '@/components/SuggestedActions.vue'
 
 const router = useRouter()
 const gameStore = useGameStore()
-const { sendAction, handleDangerConfirm, abandon, suspend, restart, initConnection } = useGameSession()
+const { sendAction, setGoal, clearGoal, handleDangerConfirm, abandon, suspend, restart, initConnection } = useGameSession()
 
 const showExitDialog = ref(false)
 
@@ -26,8 +26,10 @@ onMounted(async () => {
   await initConnection()
 })
 
+// 自由输入框新语义：提交目标声明（非本轮行动），下一轮书记官产出的选项将围绕该目标生成。
+// 不触发AI链路、不刷新当前选项、不失效预计算缓存。
 function handleSend(text: string) {
-  sendAction(text)
+  setGoal(text)
 }
 
 function confirmDanger(confirmed: boolean) {
@@ -101,24 +103,6 @@ async function handleRestartConfirm() {
     <!-- 叙事区 -->
     <NarrativeDisplay />
 
-    <!-- 选择面板 -->
-    <div
-      v-if="gameStore.showChoice && gameStore.currentChoice"
-      class="border-t border-gray-700/50 bg-slate-800/95 backdrop-blur px-4 py-3"
-    >
-      <p class="text-sm text-gray-300 mb-3">{{ gameStore.currentChoice.prompt }}</p>
-      <div class="flex flex-wrap gap-2">
-        <button
-          v-for="(option, idx) in gameStore.currentChoice.choices"
-          :key="idx"
-          @click="sendAction(option)"
-          class="px-4 py-2 rounded-lg bg-indigo-600/20 border border-indigo-500/40 text-indigo-300 text-sm hover:bg-indigo-600/30 transition-colors"
-        >
-          {{ option }}
-        </button>
-      </div>
-    </div>
-
     <!-- 危险行动确认 -->
     <div
       v-if="gameStore.showDangerConfirm && gameStore.dangerousAction"
@@ -148,10 +132,12 @@ async function handleRestartConfirm() {
     <!-- ★ 建议行动选项（预计算快速选择） -->
     <SuggestedActions />
 
-    <!-- 玩家输入区 -->
+    <!-- 玩家输入区（传入当前目标以渲染目标chip+清空按钮） -->
     <PlayerInput
       :disabled="gameStore.isInputDisabled || gameStore.isLoading"
+      :current-goal="gameStore.currentGoal"
       @send="handleSend"
+      @clear-goal="clearGoal"
     />
 
     <!-- 加载遮罩（含骰子判定详情展示） -->

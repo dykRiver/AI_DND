@@ -260,17 +260,6 @@ public class HubBroadcastService : ITransient
     }
 
     /// <summary>
-    /// 推送玩家选择点
-    /// </summary>
-    public async Task RequestChoiceAsync(long userId, PlayerChoiceDto choices)
-    {
-        var connectionId = _sessionManager.GetConnectionId(userId);
-        if (connectionId == null) return;
-
-        await _hubContext.Clients.Client(connectionId).RequestPlayerChoice(choices);
-    }
-
-    /// <summary>
     /// 推送生成进度
     /// </summary>
     public async Task SendProgressAsync(long userId, string phase, int percent, string? message = null)

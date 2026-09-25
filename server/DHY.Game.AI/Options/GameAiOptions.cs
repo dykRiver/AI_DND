@@ -74,4 +74,14 @@ public class AiModelConfig
     /// 章节档分段生成等长文场景应显式调高，避免单段被截断。
     /// </summary>
     public int MaxTokens { get; set; }
+
+    /// <summary>
+    /// 推理强度档位（reasoning_effort），OpenAI兼容接口的顶层参数。
+    /// 仅对 DashScope 的 deepseek-v4 系列思考模式生效。
+    /// 可选值：high / max（deepseek-v4-flash 不支持 low；low 仅 deepseek-v4.1-flash、
+    /// deepseek-v4-flash-0731、deepseek-v4-pro-0813 支持）。
+    /// 默认策略：留空/null = 不传该参数，使用平台默认档位（high）。
+    /// 仅在 EnableThinking=true 时才会附加到请求体。
+    /// </summary>
+    public string? ReasoningEffort { get; set; }
 }

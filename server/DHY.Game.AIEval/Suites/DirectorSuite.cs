@@ -3,7 +3,7 @@ using DHY.Game.AIEval.Infrastructure;
 namespace DHY.Game.AIEval.Suites;
 
 /// <summary>
-/// 前台导演AI评测集：结构化输出完整性（种子/文风指导/对话四层/分镜表）、
+/// GM(前台推演)AI评测集：结构化输出完整性（剧情细纲/写法提示/对话四层/分段细纲）、
 /// 成败一致性（judge层）。状态记账字段（world_state_changes/item_hints/suggested_actions）
 /// 已拆给书记官，不再在此评测。
 /// </summary>
@@ -42,19 +42,19 @@ public class DirectorSuite : EvalSuiteBase<DirectorCase>
 
         var e = c.Expect;
 
-        // 1. 叙事种子非空且长度合理（150-400字，过短=干骨架，过长=越界当正文写）
+        // 1. 剧情细纲非空且长度合理（150-400字，过短=干骨架，过长=越界当正文写）
         if (string.IsNullOrWhiteSpace(output.NarrativeSeed))
-            result.Checks.Add(CheckResult.Fail("叙事种子非空", "非空", "空"));
+            result.Checks.Add(CheckResult.Fail("剧情细纲非空", "非空", "空"));
         else if (output.NarrativeSeed.Length < 100 || output.NarrativeSeed.Length > 500)
-            result.Checks.Add(CheckResult.Fail("叙事种子长度", "[100,500]", output.NarrativeSeed.Length.ToString()));
+            result.Checks.Add(CheckResult.Fail("剧情细纲长度", "[100,500]", output.NarrativeSeed.Length.ToString()));
         else
-            result.Checks.Add(CheckResult.Ok("叙事种子长度", $"{output.NarrativeSeed.Length}字"));
+            result.Checks.Add(CheckResult.Ok("剧情细纲长度", $"{output.NarrativeSeed.Length}字"));
 
-        // 2. 文风指导非空
+        // 2. 写法提示非空
         if (!string.IsNullOrWhiteSpace(output.ProseGuidance))
-            result.Checks.Add(CheckResult.Ok("文风指导", "非空"));
+            result.Checks.Add(CheckResult.Ok("写法提示", "非空"));
         else
-            result.Checks.Add(CheckResult.Fail("文风指导", "非空", "空"));
+            result.Checks.Add(CheckResult.Fail("写法提示", "非空", "空"));
 
         // 3. 节拍分档合法；指定期望时精确匹配
         var scale = output.BeatScale?.ToLowerInvariant() ?? "";
@@ -71,17 +71,17 @@ public class DirectorSuite : EvalSuiteBase<DirectorCase>
                 result.Checks.Add(CheckResult.Fail("期望节拍分档", e.ExpectBeatScale, scale));
         }
 
-        // 4. 章节档必须输出4-8个分镜，且每段种子非空
+        // 4. 章节档必须输出4-8个分段细纲，且每段细纲非空
         if (scale == "chapter")
         {
             if (output.Beats is { Count: >= 4 and <= 8 } && output.Beats.All(b => !string.IsNullOrWhiteSpace(b.Seed)))
-                result.Checks.Add(CheckResult.Ok("章节分镜表", $"{output.Beats.Count}段"));
+                result.Checks.Add(CheckResult.Ok("章节分段细纲", $"{output.Beats.Count}段"));
             else
-                result.Checks.Add(CheckResult.Fail("章节分镜表", "4-8段且种子非空",
-                    output.Beats == null ? "无分镜" : $"{output.Beats.Count}段"));
+                result.Checks.Add(CheckResult.Fail("章节分段细纲", "4-8段且细纲非空",
+                    output.Beats == null ? "无分段" : $"{output.Beats.Count}段"));
         }
 
-        // 5. 建议行动选项已拆给书记官（suggested_actions），前台导演不再检查
+        // 5. 建议行动选项已拆给书记官（suggested_actions），GM不再检查
 
         // 6. NPC对话指导四层结构（期望对话的场景检查）
         if (e.ExpectDialogue == true)

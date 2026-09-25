@@ -132,28 +132,10 @@ public class NarrativeAiService : ITransient
         // 角色名称：有名称时用名称，无名称时用“无名旅行者”避免AI自行编造
         var characterName = string.IsNullOrEmpty(input.CharacterName) ? "无名旅行者" : input.CharacterName;
 
-        // 成人内容：使用独立提示词模板，不依赖导演蓝图
-        if (input.IsAdult)
-        {
-            var template = _promptService.LoadTemplate("narrative_adult_system");
-            var systemContent = _promptService.RenderTemplate(template, new Dictionary<string, string>
-            {
-                { "world_context", worldContext },
-                { "player_inventory", playerInventory },
-                { "character_name", characterName },
-                { "player_action", input.PlayerAction },
-                { "recent_narrative", recentNarrative }
-            });
-
-            return new List<ChatMessage>
-            {
-                new() { Role = "system", Content = systemContent },
-                new() { Role = "user", Content = "请生成叙事文本。" }
-            };
-        }
-
-        // 正常叙事：使用导演蓝图指导
-        var normalTemplate = _promptService.LoadTemplate("narrative_system");
+        // 成人轮与正常轮走同一套“导演蓝图驱动”流程，仅切换提示词模板
+        // （narrative_adult_system 与 narrative_system 占位符完全一致，均消费 director_blueprint）
+        var templateName = input.IsAdult ? "narrative_adult_system" : "narrative_system";
+        var normalTemplate = _promptService.LoadTemplate(templateName);
         var npcConstraints = BuildNpcLanguageConstraints(input.NpcLanguageCards);
         var blueprintText = BuildBlueprintText(input);
 
@@ -180,12 +162,11 @@ public class NarrativeAiService : ITransient
     }
 
     /// <summary>
-    /// 是否为章节档（需非成人内容、beat_scale=chapter 且导演输出了分镜表）
+    /// 是否为章节档（beat_scale=chapter 且导演输出了分镜表；成人轮同样适用）
     /// </summary>
     public static bool IsChapterScale(NarrativeInput input)
     {
-        return !input.IsAdult
-            && input.DirectorBlueprint != null
+        return input.DirectorBlueprint != null
             && string.Equals(input.DirectorBlueprint.BeatScale, "chapter", StringComparison.OrdinalIgnoreCase)
             && input.DirectorBlueprint.Beats is { Count: > 0 };
     }
@@ -286,8 +267,8 @@ public class NarrativeAiService : ITransient
             return ("", -1);
 
         var sw = Stopwatch.StartNew();
-        var config = _modelFactory.GetModelConfig("Narrative");
-        const string aiRole = "Narrative";
+        var aiRole = input.IsAdult ? "AdultNarrative" : "Narrative";
+        var config = _modelFactory.GetModelConfig(aiRole);
         var client = _modelFactory.CreateClient(config);
 
         var count = Math.Clamp(prefetchBeats, 1, beats.Count);
@@ -342,8 +323,8 @@ public class NarrativeAiService : ITransient
         if (beats == null || startIndex >= beats.Count)
             yield break;
 
-        var config = _modelFactory.GetModelConfig("Narrative");
-        const string aiRole = "Narrative";
+        var aiRole = input.IsAdult ? "AdultNarrative" : "Narrative";
+        var config = _modelFactory.GetModelConfig(aiRole);
         var client = _modelFactory.CreateClient(config);
 
         await foreach (var chunk in StreamChapterBeatsCoreAsync(input, client, config, aiRole, startIndex, seedText, ct))
@@ -351,27 +332,27 @@ public class NarrativeAiService : ITransient
     }
 
     /// <summary>
-    /// 构造章节档单个分镜的消息：突出本分镜种子 + 附整章蓝图参考 + 已写正文作为连贯上下文
+    /// 构造章节档单个分段的消息：突出本段细纲 + 附整章总细纲参考 + 已写正文作为连贯上下文
     /// </summary>
     private List<ChatMessage> BuildChapterBeatMessages(
         NarrativeInput input, ChapterBeatInfo beat, string chapterSoFar,
         int beatWordTarget, int index, int total)
     {
-        var normalTemplate = _promptService.LoadTemplate("narrative_system");
+        var normalTemplate = _promptService.LoadTemplate(input.IsAdult ? "narrative_adult_system" : "narrative_system");
         var npcConstraints = BuildNpcLanguageConstraints(input.NpcLanguageCards);
         var characterName = string.IsNullOrEmpty(input.CharacterName) ? "无名旅行者" : input.CharacterName;
         var worldContext = string.IsNullOrEmpty(input.WorldContext) ? "" : $"[世界背景]\n{input.WorldContext}";
         var playerInventory = string.IsNullOrEmpty(input.PlayerInventory) ? "" : $"[玩家当前装备]\n{input.PlayerInventory}";
 
-        // 本段导演蓝图：突出本分镜种子 + 附整章蓝图参考
+        // 本段细纲：突出本段分段细纲 + 附整章总细纲参考
         var beatBlueprint = new StringBuilder();
-        beatBlueprint.AppendLine($"【本段分镜种子】{beat.Seed}");
+        beatBlueprint.AppendLine($"【本段细纲】{beat.Seed}");
         if (!string.IsNullOrEmpty(beat.BeatType))
             beatBlueprint.AppendLine($"【本段类型】{beat.BeatType}");
         if (!string.IsNullOrEmpty(beat.Focus))
-            beatBlueprint.AppendLine($"【本段焦点】{beat.Focus}");
+            beatBlueprint.AppendLine($"【本段要交代清楚的事】{beat.Focus}");
         beatBlueprint.AppendLine();
-        beatBlueprint.AppendLine("【整章导演蓝图参考】");
+        beatBlueprint.AppendLine("【整章总细纲参考（只用于了解前后文，不要写其他段的内容）】");
         beatBlueprint.Append(BuildBlueprintText(input));
 
         // 连贯上下文：原历史 + 本章已写正文（取末尾，避免上下文膨胀）
@@ -406,7 +387,8 @@ public class NarrativeAiService : ITransient
         var beatTypeLabel = string.IsNullOrEmpty(beat.BeatType) ? "" : $"（{beat.BeatType}）";
         var userMsg =
             $"你正在续写同一章小说的第 {index + 1}/{total} 段{beatTypeLabel}。{positionNote}\n" +
-            $"与【最近叙事】的语气和画面无缝衔接，聚焦本段分镜焦点，本段目标约 {beatWordTarget} 字。请直接输出本段叙事文本：";
+            $"与【最近叙事】自然衔接。本段必须把【本段细纲】里的事件全部写完（不能只写开头就停），也不要提前写后面分段的内容，更不要自己发明细纲里没有的人物和事件。\n" +
+            $"本段目标约 {beatWordTarget} 字，写完事件字数不够就加对话和玩家的直接感受，不要加描写。请直接输出本段叙事文本：";
 
         return new List<ChatMessage>
         {
@@ -441,7 +423,7 @@ public class NarrativeAiService : ITransient
         var sb = new StringBuilder();
         var blueprint = input.DirectorBlueprint;
 
-        sb.AppendLine($"叙事种子: {blueprint.NarrativeSeed}");
+        sb.AppendLine($"剧情细纲: {blueprint.NarrativeSeed}");
 
         if (blueprint.Pacing != null)
             sb.AppendLine($"紧张度: {blueprint.Pacing.TensionLevel}/10 ({blueprint.Pacing.Note})");
@@ -481,7 +463,7 @@ public class NarrativeAiService : ITransient
     {
         if (string.IsNullOrEmpty(input.DirectorBlueprint?.ProseGuidance))
             return "";
-        return $"[文风指导]\n{input.DirectorBlueprint.ProseGuidance}";
+        return $"[本轮写法提示]\n{input.DirectorBlueprint.ProseGuidance}";
     }
 
     /// <summary>
@@ -493,29 +475,29 @@ public class NarrativeAiService : ITransient
         {
             "action" or "critical" =>
                 "[战斗/紧张场景文风]\n" +
-                "句式：短促断句，动词密集，省略主语。碎片化节奏。\n" +
-                "感官：触觉（冲击/灼烧）和听觉（金属/喘息）优先。\n" +
-                "手法：用断句制造急迫感；战斗动作不描写心理，只写身体本能反应；一个精准的痛感细节胜过十句“你受伤了”。\n",
+                "节奏：动作快写、结果直写。一个回合的攻防一两句话写完，谁打了谁、打中没打中、现在谁占上风，读者一眼看明白。\n" +
+                "感受：允许直接写玩家的紧张和判断（“你知道躲不开了”“你心里一紧”），一句带过，接着写动作。\n" +
+                "禁忌：不拆分解动作、不写精确尺寸角度秒数、不做慢镜头、不堆比喻。一个疼的细节（“虎口震得发麻”）就够了。\n",
             "dialogue" =>
                 "[对话交互场景文风]\n" +
-                "句式：中长句为主，对话间插入叙述描写控制节奏。\n" +
-                "感官：视觉（微表情/眼神）和听觉（语气/停顿）优先。\n" +
-                "手法：潜台词和身体语言的矛盾是核心张力源；对话不急于揭示全部，留白让读者自己补完；NPC的每个小动作都有信息量。\n",
+                "节奏：以台词为主体，台词之间用一两句动作或表情衔接，不要在两句台词之间塞一大段描写。\n" +
+                "感受：玩家对NPC话里意思的判断可以直接写（“你听出他在敷衍”），一句话点到即止。\n" +
+                "禁忌：NPC的每个小动作只写一次、只写一句；不分析潜台词，让读者从台词和动作的矛盾里自己看出来。\n",
             "opening" or "exploration" =>
                 "[探索/入场场景文风]\n" +
-                "句式：舒缓长句，从句铺陈环境。感官堆叠营造沉浸。\n" +
-                "感官：嗅觉和触觉优先（气味最先到达，触感建立空间感）。\n" +
-                "手法：一个具体、意外、有质感的细节胜过五个泛泛描写；环境不是背景板而是“活的存在”；用光线和声音暗示情绪基调。\n",
+                "节奏：先用两三句把地方交代清楚（哪里、什么样、有什么），再挑一个最有意思的细节写细。\n" +
+                "感受：写玩家看到这地方的第一反应（“这地方比你想的更破”），让读者跟着玩家的眼睛走。\n" +
+                "禁忌：不用长从句铺陈环境、不堆叠感官描写、不把环境拟人化成“活的存在”。\n",
             "horror" =>
                 "[恐怖场景文风]\n" +
-                "句式：不完整句，感官扭曲，信息缺失。\n" +
-                "感官：体感（寒冷/心跳/皮肤发麻）和听觉（不明来源的声音）优先。\n" +
-                "手法：恐惧来自“不知道”而非“看到”；信息留白是最强的恐怖工具；感官失真（声音忽远忽近、视觉模糊）制造不确定感。\n",
+                "节奏：正常叙述中突然出现一件不对的事，说清楚哪里不对，然后停住让玩家反应。\n" +
+                "感受：直接写玩家的害怕（“你后背一凉”“你不敢回头”），这是恐怖感最直接的来源。\n" +
+                "禁忌：不用“某种”“什么东西”这类模糊指代装神秘；不写感官失真、不写残缺句；恐怖来自事实本身不对劲，不来自文字含糊。\n",
             _ =>
                 "[日常场景文风]\n" +
-                "句式：自然口语化的中长句，轻松从容。\n" +
-                "感官：环境背景音和生活质感细节。\n" +
-                "手法：用生活化的感官细节建立世界真实感；节奏不紧不慢，让读者“呼吸”。\n"
+                "节奏：口语化，像讲故事一样说事，把该发生的事说完。\n" +
+                "感受：玩家的想法和情绪可以自然带出（“你有点犯困”“你懒得理他”）。\n" +
+                "禁忌：不为了氛围写景，一两句生活细节点一下就往下走。\n"
         };
     }
 

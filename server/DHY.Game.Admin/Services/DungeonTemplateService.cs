@@ -63,7 +63,12 @@ public class DungeonTemplateService : IDynamicApiController, ITransient
             Tags = input.Tags,
             Description = input.Description,
             BasePrompt = input.BasePrompt,
-            MaxLevel = input.MaxLevel
+            MaxLevel = input.MaxLevel,
+            DifficultyModifier = input.DifficultyModifier,
+            Tone = input.Tone,
+            SensorySeeds = input.SensorySeeds,
+            ForbiddenCliches = input.ForbiddenCliches,
+            MotifSeeds = input.MotifSeeds
         };
 
         var result = await _templateRep.AsInsertable(entity).ExecuteReturnEntityAsync();
@@ -89,6 +94,11 @@ public class DungeonTemplateService : IDynamicApiController, ITransient
         entity.Description = input.Description;
         entity.BasePrompt = input.BasePrompt;
         entity.MaxLevel = input.MaxLevel;
+        entity.DifficultyModifier = input.DifficultyModifier;
+        entity.Tone = input.Tone;
+        entity.SensorySeeds = input.SensorySeeds;
+        entity.ForbiddenCliches = input.ForbiddenCliches;
+        entity.MotifSeeds = input.MotifSeeds;
 
         await _templateRep.AsUpdateable(entity).ExecuteCommandAsync();
     }

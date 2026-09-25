@@ -73,7 +73,7 @@ public class QuartermasterAiService : ITransient
             var ledgerText = string.IsNullOrWhiteSpace(currentLedger) ? "（当前账本为空）" : currentLedger;
             var userContent =
                 $"【本轮玩家行动】\n{playerAction}\n\n" +
-                $"【导演蓝图 item_hints（权威事实基准，逐条落实）】\n{itemHints}\n\n" +
+                $"【GM细纲 item_hints（权威事实基准，逐条落实）】\n{itemHints}\n\n" +
                 $"【当前账本（已有资产，勿重复登记）】\n{ledgerText}";
 
             var messages = new List<ChatMessage>

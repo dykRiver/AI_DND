@@ -110,21 +110,6 @@ public class TimeTransitionDto
 }
 
 /// <summary>
-/// 玩家选择点
-/// </summary>
-public class PlayerChoiceDto
-{
-    /// <summary>选择提示</summary>
-    public string Prompt { get; set; } = "";
-
-    /// <summary>选项列表</summary>
-    public List<string> Choices { get; set; } = new();
-
-    /// <summary>是否必须选择</summary>
-    public bool IsRequired { get; set; }
-}
-
-/// <summary>
 /// 副本生成进度
 /// </summary>
 public class GeneratingProgressDto
@@ -371,6 +356,9 @@ public class DungeonReadyDto
 
     /// <summary>初始游戏状态</summary>
     public GameStateDto GameState { get; set; } = new();
+
+    /// <summary>玩家当前目标（断线恢复/重新开始时同步给前端，用于渲染目标chip与清空按钮）</summary>
+    public string CurrentPlayerGoal { get; set; } = "";
 }
 
 #endregion
@@ -393,6 +381,15 @@ public class SelectCachedActionInput
 
     /// <summary>成人模式开关（缓存未命中回退时使用）</summary>
     public bool IsAdultMode { get; set; }
+
+    /// <summary>
+    /// 手动世界难度覆盖值（前端“世界难度调整模式”开启时传入，范围 -20~+20；关闭时为 null）。
+    /// 非空时替换副本模板的 DifficultyModifier；为空时回退模板难度。
+    /// </summary>
+    public int? WorldDifficultyOverride { get; set; }
+
+    /// <summary>VIP模式开关（缓存未命中回退时透传给下一轮预计算，使其预生成叙事）</summary>
+    public bool IsVipMode { get; set; }
 }
 
 /// <summary>
@@ -406,8 +403,14 @@ public class PlayerActionInput
     /// <summary>会话ID</summary>
     public long SessionId { get; set; }
 
-    /// <summary>成人模式开关（前端玩家手动切换，开启后跳过分类AI直接走成人叙事）</summary>
+    /// <summary>成人模式开关（前端玩家手动切换；开启后全链路切换成人版提示词模板与模型，仍走完整流程）</summary>
     public bool IsAdultMode { get; set; }
+
+    /// <summary>
+    /// 手动世界难度覆盖值（前端“世界难度调整模式”开启时传入，范围 -20~+20；关闭时为 null）。
+    /// 非空时替换副本模板的 DifficultyModifier；为空时回退模板难度。
+    /// </summary>
+    public int? WorldDifficultyOverride { get; set; }
 
     /// <summary>
     /// 行动粒度（仅服务端内部使用，前端不传）：
@@ -415,6 +418,21 @@ public class PlayerActionInput
     /// 保证粗粒度推进选项仍让导演走章节档；玩家自由输入保持默认 detail。
     /// </summary>
     public string ActionScale { get; set; } = ActionScales.Detail;
+
+    /// <summary>VIP模式开关（前端玩家手动切换；开启后本轮结束时启动的下一轮预计算会预生成叙事文本，点选时秒回放）</summary>
+    public bool IsVipMode { get; set; }
+}
+
+/// <summary>
+/// 设置玩家目标输入（自由输入框提交的中长期意图，非本轮行动）
+/// </summary>
+public class SetPlayerGoalInput
+{
+    /// <summary>会话ID</summary>
+    public long SessionId { get; set; }
+
+    /// <summary>目标文本（前端限100字，服务端兼底截断至200字）</summary>
+    public string GoalText { get; set; } = "";
 }
 
 /// <summary>
@@ -445,6 +463,9 @@ public class SelectDungeonInput
 
     /// <summary>魅力</summary>
     public int Charisma { get; set; }
+
+    /// <summary>VIP模式开关（前端玩家手动切换；开启后开场轮预计算会预生成叙事文本，点选时秒回放）</summary>
+    public bool IsVipMode { get; set; }
 }
 
 /// <summary>
@@ -493,6 +514,9 @@ public class RestartSessionInput
 {
     /// <summary>会话ID</summary>
     public long SessionId { get; set; }
+
+    /// <summary>VIP模式开关（前端玩家手动切换；开启后重新开始开场轮预计算会预生成叙事文本，点选时秒回放）</summary>
+    public bool IsVipMode { get; set; }
 }
 
 #endregion

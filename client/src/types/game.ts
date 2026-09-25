@@ -115,13 +115,6 @@ export interface CharacterCreateInput {
   charisma: number
 }
 
-// ========== 选择项 ==========
-export interface PlayerChoice {
-  prompt: string
-  choices: string[]
-  isRequired: boolean
-}
-
 // ========== 危险行动确认 ==========
 export interface DangerousActionConfirm {
   actionId: string
@@ -175,6 +168,8 @@ export interface DungeonReady {
   dungeonName: string
   worldInfo: WorldInfo
   gameState: GameState
+  /// 玩家当前目标（断线恢复/重新开始时由服务端同步，用于渲染目标chip与清空按钮）
+  currentPlayerGoal?: string
 }
 
 // ========== 系统消息 ==========
@@ -219,6 +214,8 @@ export interface ActiveSessionResult {
    * 仅文本，无 isFeasible：点选后服务端自动分流（缓存命中→秒响应；未命中→常规全链路）。
    */
   suggestedActions?: SuggestedAction[]
+  /// 玩家当前目标（断线续玩时同步，用于渲染目标chip与清空按钮）
+  currentPlayerGoal?: string
 }
 
 export interface ActiveSessionNarrative {

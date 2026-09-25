@@ -1,6 +1,18 @@
-# AI系统架构 v4.4.2
+# AI系统架构 v4.9.1
 
-> 版本：4.4.2 | 生效日期：2026-09-16 | 变更类型：**书记官选项接住导演引导线索 + 两侧提示词微瘦身**。`scribe_system.txt` 新增规则：`suggested_actions` 必须接住既定事实中的「引导线索」（导演 `narrative_hooks` 经 `BuildDirectorFacts` 拼入）——至少一个选项顺线索延伸，多条线索时两选项分别对应不同线索，禁止同跟一条；此前导演模板已按“抉择点时 hooks 是各选项的隐含暗示”设计，但书记官侧无对应规则，hooks 只以无约束的隐性路径影响选项。同批删除已废弃的 `director_system.txt`（含 bin 副本），导演模板删纯旁白行“这四层信息让叙事AI…”，书记官模板去三处重复（“未变化字段不输出”并入总规则、item_hints 字段清单与 schema 双写、schema 硬写 15 字与粗粒度档 20 字矛盾）
+> 版本：4.9.1 | 生效日期：2026-09-22 | 变更类型：**提示词调优（player_choice_point 与 beat_scale 解耦 + 判定收紧）**。导演模板 `director_front_system.txt` / `director_adult_front_system.txt` 两处调整：①**解耦**——删除「`player_choice_point=true` → 强制 `beat_scale=chapter`」触发条件，`player_choice_point` 不再影响叙事分档，仅作为书记官「选项节奏档」（`IsKeyMoment`）判据之一；`beat_scale` 分档依据回归「内容分量」（主线节点 / tension≥8 / 重大转折·关键揭示 / [推进型行动] 标记）。②**收紧 `player_choice_point` 判定**——语义明确为「有实质后果、会改变剧情走向的重大抉择点」，默认 false；true 条件加限定（不可逆后果 / 显著改变走向 / 需明确表态且实质影响局势），并新增负面清单（普通寒暄询问、无实质分歧的常规推进轮、`tension_level<6` 且无重大转折的普通轮、可自由输入的常规行动轮一律 false）。**背景**：原规则「任一条件满足即 true」过于宽泛（TRPG 几乎每轮都存在多路径/NPC提问/新区域），导致紧张度仅 5~6 的普通轮也频繁 `player_choice_point=true`，连带顶成 chapter，使书记官选项几乎恒为细粒度、粗粒度推进档形同虚设。**代码层 `AiCoordinatorService.IsKeyMoment`（`PlayerChoicePoint || BeatScale==chapter || TensionLevel>=8`）未改动**，仅输入变干净。需重新构建刷新 bin 模板副本后生效。详见 [叙事设计规范 v2.5.1](narrative-design.md)
+>
+> 历史版本 4.9.0（2026-09-19）：**VIP模式（预计算阶段预生成叙事，点选秒回放）**。新增会话级手动开关 `IsVipMode`（前端 `StatusPanel` 下拉菜单 ⚡ 按钮切换、`gameStore.isVipMode`，不持久化、刷新归零，与成人模式同构）。开启后预计算在**导演层之后额外预生成叙事正文**（相当于对 VIP 会话按需把预计算深度从 L1 升到 L3），玩家点选选项时直接**文本回放**（首字延迟≈0），而非实时流式生成。**代价**：每轮为2个选项各生成一次叙事，玩家只用1个 → 叙事 token 约翻倍；且预计算就绪时刻从「导演(~15s)」回升到「导演+叙事(~35s)」，玩家读得快时可能未就绪 → 该轮自动降级实时流式（不报错）。**实现**：`PrecomputeAsync`/`PrecomputeSingleOptionAsync` 加 `bool isVip` 参数，VIP 且 `NarrativeInput != null` 时调 `NarrativeAiService.GenerateNarrativeAsync`（非流式，内部自动处理章节档）预生成文本写入 `PrecomputedActionCache.NarrativeText`（复用 L1 改造后废弃字段），预生成失败静默降级（`NarrativeText` 留空）；`ProcessSelectCachedActionAsync` 点选时优先判 `cached.NarrativeText` 非空 → `StreamNarrativeAsync` 回放，否则降级 `StreamNarrativeLiveAsync`。`IsVipMode` 经4个输入DTO（`PlayerActionInput`/`SelectCachedActionInput`/`SelectDungeonInput`/`RestartSessionInput`）透传，4处预计算入口（常规轮/缓存轮记账链尾、开场轮、重新开始轮）均带上；`ProcessRestartSessionAsync` 签名加 `bool isVip`。**边界**：VIP 只影响预计算深度与点选回放；自由输入路径无预计算，仍实时流式；不可行短路（`NarrativeInput=null`）不预生成，点选回放协调器已产出的拒绝文案。
+>
+> 历史版本 4.8.0（2026-09-19）：**成人轮预计算继承会话级成人模式**（对齐世界难度 override 的“下一轮预计算起生效”语义）。废除 v4.6.0 的“成人轮不做预计算”门控：`ActionPrecomputeService.PrecomputeAsync` / `PrecomputeSingleOptionAsync` 新增 `bool isAdult` 参数，透传到 `ProcessActionInput.IsAdultMode`（与 `WorldDifficultyOverride` 同一条透传链）；`GameSessionHub` 两处预计算启动点（`ProcessPlayerActionAsync` / `ProcessSelectCachedActionAsync` 记账链尾）传 `input.IsAdultMode`，使成人轮也用成人模型（`AdultClassifier`→`AdultDirector`）预掷、缓存 `NarrativeInput.IsAdult = true` 的导演蓝图与 `AdultScribe` 书记官任务；点选命中后叙事实时按 `IsAdult` 选 `AdultNarrative`、书记官 `await` 成人 `ScribeTask`，全链路成人自洽。两处“成人轮直接推送选项”的 `else if` 分支已删除（成人轮 `precomputeTask != null` 走正常预计算推送）。`LastSuggestedActions` 持久化仍跳过成人轮（避免断线恢复显示成人选项文本）。**切换语义**：切换成人模式后当前已缓存选项按旧模式回放（最多一轮过渡），从下一次预计算起全链路切换；切换后手动输入立即生效（无过渡）。开场轮预计算无成人输入，固定传 `false`。
+>
+> 历史版本 4.7.0（2026-09-18）：**玩家自由输入语义重定义（目标声明制）**。前端自由输入框不再作为“本轮行动”进入分类/导演/叙事链路，而是作为“中长期目标声明”仅写库；下一轮书记官构造 `ScribeInput` 时读取该目标并以 `[玩家当前目标]` 消息对注入 prompt，让产出的 `suggested_actions` 围绕目标生成。新增 Hub 方法 `SetPlayerGoal` + DTO `SetPlayerGoalInput` + 实体字段 `GameDungeonSession.CurrentPlayerGoal`（覆盖式存储、跨会话持久化、不自动清空）+ `ScribeInput.PlayerGoal`；`DungeonReadyDto` 与 `ActiveSessionCheckOutput` 同步回填 `CurrentPlayerGoal`，支持断线续玩/跨设备/页面刷新一致性；4 个书记官模板（`scribe_system` / `scribe_adult_system` / `scribe_suggestions_system` / `scribe_adult_suggestions_system`）各加一条“两档通用规则”：若含 `[玩家当前目标]`，两个选项应共同服务于该目标但不得违反本轮既定事实与世界状态，目标与剧情冲突时优先输出化解冲突的路径。前端：`PlayerInput.vue` 新增目标 chip（🎯 当前目标 {text} ×）+ 100 字硬上限 + placeholder 改为“表达你的意图或目标…”；`gameStore.currentGoal` 接入 localStorage 持久化；`useGameSession` 新增 `setGoal` / `clearGoal` 包装（乐观更新）。**不新增 AI 节点、不新增链路**：目标提交流程只写库 + 推送一条 info 反馈消息，不触发任何 AI 调用、不失效预计算缓存、不刷新当前选项。Hub 既有 `PlayerAction` 方法保留，仅供 `SelectCachedAction` 缓存未命中时的回退路径内部使用（前端自由输入不再调用）。
+>
+> 历史版本 4.6.0（2026-09-18）：**成人内容全链路对齐**。成人轮（会话级成人模式开启 `IsAdultMode`，或分类AI判定 `is_adult`）不再走 `HandleAdultAction` 快捷通道跳过导演，而是与正常轮走**完全一致**的「分类 → 导演 → 叙事 → 书记官（完整记账）→ 物资官」全链路，仅由导演/叙事/书记官三个AI按 `IsAdult` 切换成人版提示词模板 + Poixe 模型配置。新增 `director_adult_front_system.txt` / `scribe_adult_system.txt` / `scribe_adult_suggestions_system.txt` 三个成人模板与 `AdultDirector` / `AdultScribe` 两个模型配置（`AdultNarrative` 已有）；`narrative_adult_system.txt` 改为消费导演蓝图（占位符与 `narrative_system` 一致），成人轮同样支持章节档 `beats`。成人轮**不做预计算**（避免用非成人模型生成预取预览），但书记官产出的2个选项照常推送、点击时经缓存未命中回退走实时成人全链路。
+>
+> 历史版本 4.5.0（2026-09-18）：**网文优先框架重构（去电影感）**。前台导演提示词的角色从「TRPG导演(DM)」改为「游戏主持人(GM)」（模型可见词，代码组件名 `Director`/`director_front_system.txt` 不变）；`narrative_seed` 从「250字文学场景速写」改为「**剧情细纲**」（时间顺序事件条目 + NPC台词大意 + 玩家状态变化），叙事AI**据细纲从零写正文**而非扩写散文；`prose_guidance` 从「句式节奏+感官重点+文学手法」改为「叙事节奏+玩家情绪落点+必须写清的信息」；`beats` 分镜表→分段细纲；叙事AI创作三原则→写作四原则（网文可读性优先）；建筑师文风圣经禁用电影/文学流派当语调；整链移除电影术语。详见 [叙事设计规范 v2.5.0](narrative-design.md)
+>
+> 历史版本 4.4.2（2026-09-16）：**书记官选项接住导演引导线索 + 两侧提示词微瘦身**。`scribe_system.txt` 新增规则：`suggested_actions` 必须接住既定事实中的「引导线索」（导演 `narrative_hooks` 经 `BuildDirectorFacts` 拼入）——至少一个选项顺线索延伸，多条线索时两选项分别对应不同线索，禁止同跟一条。同批删除已废弃的 `director_system.txt`（含 bin 副本），导演模板删纯旁白行，书记官模板去三处重复
 >
 > 历史版本 4.4.1（2026-09-16）：前台导演提示词瘦身第二批——删 `[常规行动]` 规则及导演侧 `IsRoutine` 注入链；主线进度规则并入主动引导规则，改为响应 `[剧情推进提示]`；schema 与规则段去双写；新增支线/隐藏内容清单使用规则
 >
@@ -37,15 +49,15 @@
 
 | 属性 | 值 |
 |------|------|
-| 职责 | 推演世界反应，**基于判定结果**生成叙事种子+文风指导+对话层级；**只做创作与节奏决策，不产出任何状态账目** |
+| 职责 | 推演世界反应，**基于判定结果**生成本轮剧情细纲+写法提示+对话层级；**只做创作与节奏决策，不产出任何状态账目**（提示词角色为「游戏主持人(GM)」，代码组件名仍为 Director） |
 | **模型（v4.0.0）** | `deepseek-v4-flash`，**要求 `EnableThinking = false`**（关键路径；输出 schema 砍半后解码耗时显著下降。`qwen3.7-max` 为备选，按实测质量定夺） |
 | 输入上下文 | 副本设定 + NPC档案 + **局面快照(含历史)** + 主线进度 + 支线/隐藏内容清单（埋线索素材） + 玩家背包 + **[判定结果]** + **[行动意图+原始表达]**；条件注入：`[角色再定位]`、`[剧情推进提示]`（代码层停滞检测命中）、`[推进型行动]`（点选粗粒度选项）。不再注入 `[常规行动]` 标记（v4.4.1 移除：它与掷骰无因果关系，“无[判定结果]则直接描述结果”已覆盖其语义） |
-| 输出格式 | 严格JSON（**narrative_seed**(250字文学场景速写) / **prose_guidance**(句式节奏+感官重点+文学手法) / **beat_scale**(节拍分档：micro/normal/chapter) / **beats**(章节档分镜表4-8个，含seed/beat_type/focus) / **narrative_word_target**(目标字数) / npc_actions(含**dialogue_direction**四层结构，**不含 attitude_change**) / pacing / narrative_hooks / player_choice_point / time_advance） |
-| 模板 | `director_front_system.txt`（v4.0.0 从 `director_system.txt` 拆出） |
+| 输出格式 | 严格JSON（**narrative_seed**(250字剧情细纲：时间顺序事件条目+NPC台词大意+玩家状态变化) / **prose_guidance**(叙事节奏+玩家情绪落点+必须写清的信息) / **beat_scale**(节拍分档：micro/normal/chapter) / **beats**(章节档分段细纲4-8个，含seed/beat_type/focus) / **narrative_word_target**(目标字数) / npc_actions(含**dialogue_direction**四层结构，**不含 attitude_change**) / pacing / narrative_hooks / player_choice_point / time_advance） |
+| 模板 | `director_front_system.txt`（v4.0.0 从 `director_system.txt` 拆出）；**成人轮切换 `director_adult_front_system.txt`**（v4.6.0，输出 schema 与正常导演一致） |
 
 **关键变化（v4.0.0：前台/后台拆分）**：
 - `world_state_changes`（含 `quest_progress`）、`item_hints`、`npc_attitude_changes`、`suggested_actions` 四类状态账目**全部移交书记官AI**，与叙事流式并行产出
-- 前台导演的输出即**既定事实**：书记官只依此记账，**导演没写的事等于没发生**——故剧情涉及的状态后果必须在 `narrative_seed` 或 `npc_actions` 中明确体现
+- 前台导演（GM）的输出即**既定事实**：书记官只依此记账，**GM 没写的事等于没发生**——故剧情涉及的状态后果必须在 `narrative_seed` 或 `npc_actions` 中明确体现
 - 输出 schema 减半（原 ~1965 token），直接缩短玩家等待的解码时间
 
 **关键变化（v3.0.0）**：
@@ -63,10 +75,12 @@
 | 模型 | `deepseek-v4-flash`，`Temperature = 0.3`，**要求 `EnableThinking = false`** |
 | 时机 | **前台导演返回后，与叙事流式并行**（作为后台 `Task` 随 `GameActionResult.ScribeTask` 透传，Hub 在叙事播放期间 `await`） |
 | 触发门控 | **所有经过导演蓝图的常规轮一律走完整记账**（无分类门控）；仅**无导演蓝图的场景**（开场轮/不可行短路）走 SuggestionsOnly 轻量模式 |
-| 输入上下文 | 玩家行动+意图 + 判定结果 + **前台导演既定事实文本** + 局面快照 + NPC档案 + 玩家背包 + 主线进度 + 支线/隐藏内容清单 |
+| 输入上下文 | 玩家行动+意图 + 判定结果 + **前台导演既定事实文本** + **玩家当前目标（v4.7.0，非空时注入）** + 局面快照 + NPC档案 + 玩家背包 + 主线进度 + 支线/隐藏内容清单 |
 | 输出格式 | JSON `{world_state_changes(含quest_progress), item_hints, npc_attitude_changes, suggested_actions}` |
 | 落库职责 | `WorldStateService.ApplyChangesAsync`（世界状态）+ `NpcService.UpdateAttitudeAsync`（NPC态度）；`item_hints` 交物资官、`suggested_actions` 交预计算 |
 | 轻量模式（SuggestionsOnly） | `ScribeInput.SuggestionsOnly = true` 时切换模板 `scribe_suggestions_system.txt`，只产出 `suggested_actions`（恰好2个）；`RunScribeTaskAsync` 内强制忽略 `world_state_changes`/`npc_attitude_changes` 不落库。**v4.3.0 起仅覆盖开场轮（首次进入·重新开始·重玩）与不可行短路**（无导演蓝图的场景），纯叙事轮已回归完整记账 |
+| 玩家目标注入（v4.7.0） | `ScribeInput.PlayerGoal` 非空时，`ScribeAiService` 在 `[本轮既定事实]` 后、`[选项节奏档]` 前注入 `[玩家当前目标]` 消息对（附带“中长期意图、非本轮行动、选项须服务于目标但不得脱离既定事实”提示）。目标来源：`GameDungeonSession.CurrentPlayerGoal`（前端 `SetPlayerGoal` Hub 方法写入）。常规路径与 SuggestionsOnly 路径均支持；断线续玩/重开时目标仍生效 |
+| 成人轮模板（v4.6.0） | `ScribeInput.IsAdult = true` 时切换成人版模板，与正常轮同构二选一：完整记账轮用 `scribe_adult_system.txt`（输出全量结构化账目、正常落库），SuggestionsOnly 轻量轮用 `scribe_adult_suggestions_system.txt`；模型统一走 `AdultScribe` |
 | 失败策略 | 失败**重试1次**；仍失败则**本轮状态不变、叙事不中断**，记 error 日志（Task 内自捕异常，永不抛给调用方） |
 | 纪律 | 只记录既定事实，不新增剧情、不改写导演结论 |
 
@@ -74,11 +88,12 @@
 
 | 属性 | 值 |
 |------|------|
-| 职责 | 第二人称小说级写作，基于叙事种子续写、丰富、润色为沉浸文本 |
+| 职责 | 第二人称通俗小说写作（网文可读性优先），基于 GM 的剧情细纲从零写正文（而非扩写润色散文） |
 | 输出格式 | 流式纯文本 |
-| 成败感知 | 仅从导演蓝图的 narrative_seed 感知（不重复注入骰子数值） |
-| 道具纪律 | **不得新增或取消导演蓝图中的道具/情报交付**，只如实扩写蓝图既定的资产变更 |
-| 创作指导 | 创作三原则 + 对话写作原则 + 创作思考指南(thinking mode) + 场景文风模块 + 文风圣经 + 意象追踪 + 3个Few-shot示例 |
+| 成败感知 | 仅从细纲的 narrative_seed 感知（不重复注入骰子数值） |
+| 道具纪律 | **不得新增或取消细纲中的道具/情报交付**，也不得自行发明细纲里没有的NPC/武器/事件；细纲里列的事一件不漏、没有的事一件不加 |
+| 创作指导 | 写作四原则（先说清事/大白话优先/情绪直给/一个细节就够）+ 硬性禁令 + 对话写作原则 + 创作思考指南(thinking mode) + 场景文风模块 + 文风圣经 + 意象追踪 + 3个白话Few-shot示例 |
+| 模板 | `narrative_system.txt`；**成人轮切换 `narrative_adult_system.txt`**（v4.6.0 已改为消费导演蓝图，占位符与 `narrative_system` 完全一致，同样支持章节档分段生成） |
 
 ### 道具AI（Quartermaster，物资官）
 
@@ -104,9 +119,9 @@
 **文风圣经（Style Bible）**（一次性生成，每轮注入叙事AI）：
 ```json
 {
-  "tone": "语调风格描述（如'阴冷克制的现实主义，偶有诗意的恐怖意象'）",
-  "sentence_rhythm": "句式偏好（如'短句堆叠制造窒息感；环境描写用绵长从句'）",
-  "sensory_palette": "感官调色板（如'消毒水味/荧光灯喗鸣/瓷砖冷意/远处轮子吱呀声'）",
+  "tone": "语调（一句大白话说清故事气质，如'糙糙的求生故事，没有人是好人'；禁用电影/文学流派如'黑色电影风格''魔幻现实主义'）",
+  "sentence_rhythm": "叙事节奏偏好（如'对话多、推进快；危险时句子变短'；禁'从句''窒息感''碎片化''黏稠''绵长'）",
+  "sensory_palette": ["消毒水味", "灯管嗡嗡响", "瓷砖冰冷"],
   "forbidden_cliches": ["令人毛骨悚然", "不寒而栗", "腔背发凉"]
 }
 ```
@@ -157,6 +172,36 @@
     infeasible → 直接返回拒绝叙事（不进入导演流程）
 ```
 
+### 成人内容全链路（v4.6.0）
+
+成人内容与正常内容共用同一条链路，**唯一差异是三个创作/记账AI切换成人版提示词模板与 Poixe 模型**；分类、掷骰、可行性门卫、时段推进、完整状态记账、物资官落库、NPC态度更新、选项推送全部照常。
+
+**触发与判定**（`AiCoordinatorService.ProcessPlayerActionAsync`）：
+
+```
+isAdult = input.IsAdultMode（会话级成人模式开关） || classification.IsAdult（分类AI逐条判定）
+```
+
+- 分类AI之后计算 `isAdult`，透传到 `DirectorInput.IsAdult` / `NarrativeInput.IsAdult` / `ScribeInput.IsAdult`
+- **v4.6.0 前**：`IsAdultMode` 走 step 0 快捷通道、`classification.IsAdult` 走 step 2 短路，二者均调 `HandleAdultAction` 跳过分类/导演，叙事不依赖蓝图、无书记官、无选项。**该快捷通道与 `HandleAdultAction` 已删除**
+- 主轮 `ScribeInput.SuggestionsOnly = false`（成人同样完整记账）；仅开场/不可行补救走 SuggestionsOnly 轻量模式
+
+**三个AI的成人切换**：
+
+| AI | 正常模板 / 模型 | 成人模板 / 模型 |
+|----|----------------|----------------|
+| 前台导演 | `director_front_system` / `Director` | `director_adult_front_system` / `AdultDirector` |
+| 叙事 | `narrative_system` / `Narrative` | `narrative_adult_system` / `AdultNarrative` |
+| 书记官（完整记账） | `scribe_system` / `Scribe` | `scribe_adult_system` / `AdultScribe` |
+| 书记官（仅选项） | `scribe_suggestions_system` / `Scribe` | `scribe_adult_suggestions_system` / `AdultScribe` |
+
+- 三个成人模型均走 `Provider = poixe`（`grok-4-latest`）。⚠️ `DirectorAiService` / `ScribeAiService` 必须用 `AiModelFactory.CreateClient(config)`（而非无参 `CreateClient()`）才能按 `Provider` 路由到 `PoixeClient`
+- `narrative_adult_system.txt` 已改为消费导演蓝图，成人轮同样支持章节档 `beats` 分段流式生成（`IsChapterScale` 不再排除成人）
+
+**预计算与选项推送（v4.8.0：成人轮也做预计算）**：预计算继承会话级成人模式——`PrecomputeAsync` / `PrecomputeSingleOptionAsync` 的 `isAdult` 参数透传到 `ProcessActionInput.IsAdultMode`，`GameSessionHub` 两处预计算启动点传 `input.IsAdultMode`。成人轮因此用成人模型（`AdultClassifier`→`AdultDirector`）预掷，缓存 `NarrativeInput.IsAdult = true` 的导演蓝图与 `AdultScribe` 书记官任务；点选命中后叙事实时按 `IsAdult` 选 `AdultNarrative`、书记官 `await` 成人 `ScribeTask`，全链路成人自洽。v4.6.0 的“成人轮不预计算 + `else if` 直接推送”分支已删除（成人轮 `precomputeTask != null` 走正常预计算推送：加载态→就绪回填可行性）。`LastSuggestedActions` 持久化仍跳过成人轮（避免断线恢复显示成人选项文本）。**切换语义对齐世界难度 override**：切换模式后当前已缓存选项按旧模式回放（最多一轮过渡），下一次预计算起切换；切换后手动输入立即生效。开场轮预计算固定传 `false`。
+
+**叙事历史过滤**：规则不变——仅当本次为非成人且上次为成人时，跳过中间成人记录取最近5条非成人叙事；判定条件由 `classification.IsAdult` 改为 `isAdult`。
+
 ### 副本创建
 
 ```
@@ -165,12 +210,12 @@
 
 ## 文学引擎三层架构
 
-叙事系统的核心设计，通过三层分离实现「小说家级」文学品质：
+叙事系统的核心设计，通过三层分离实现「通俗小说级」可读性（v4.5.0：目标从“小说家级文学品质”调整为“普通玩家一遍读懂”）：
 
 ```
 Layer 0（建筑师AI，一次性）→ style_bible + motifs → 存入 session
-Layer 1（导演AI，每轮）    → narrative_seed + prose_guidance + dialogue_direction
-Layer 2（叙事AI，每轮）    → 基于种子续写，受文风圣经/意象/场景文风约束
+Layer 1（导演AI，每轮）    → narrative_seed（剧情细纲）+ prose_guidance + dialogue_direction
+Layer 2（叙事AI，每轮）    → 据细纲从零写正文，受文风圣经/意象/场景文风约束
 ```
 
 ### Layer 0：建筑师层（一次性，副本创建时）
@@ -183,19 +228,20 @@ Layer 2（叙事AI，每轮）    → 基于种子续写，受文风圣经/意�
 
 | 输出字段 | 说明 | 对叙事质量的影响 |
 |----------|------|------------------|
-| `narrative_seed` | 250字文学性场景速写（非事件摘要） | 叙事AI不再从干骨架"翻译"，而是从有画面感的种子"续写" |
-| `prose_guidance` | 句式节奏+感官重点+文学手法 | 导演AI主动引导文风，而非全靠叙事AI自行判断 |
+| `narrative_seed` | 250字剧情细纲（时间顺序事件条目，非散文也非一句话摘要） | 叙事AI拿它当骨架从零写正文，而非从干骨架“翻译”或从散文“扩写注水” |
+| `prose_guidance` | 叙事节奏+玩家情绪落点+必须写清的信息 | GM 主动引导写法（而非电影镜头指令），禁慢镜头/特写/碎片化句式 |
 | `dialogue_direction` | surface/subtext/conceal/body_language | 对话从"台词大意"变为有潜台词、有身体语言矛盾的深度场景 |
 
 ### Layer 2：叙事层（每轮）
 
-- **创作三原则**：精准胜于丰富 / 身体先于意识 / 留白即力量
+- **写作四原则**：先把事说清楚 / 大白话优先 / 情绪直给 / 一个细节就够（v4.5.0 替代旧「创作三原则」）
+- **硬性禁令**：禁精确物理数值/慢镜头分解/模糊指代，比喻与短段限量（详见 [叙事设计规范](narrative-design.md)）
 - **对话写作原则**：利用多层对话指导写出有张力的对话场景
-- **场景文风模块**：根据 scene_type 自动切换（战斗/对话/探索/恐怖/日常五种）
+- **场景文风模块**：根据 scene_type 自动切换（战斗/对话/探索/恐怖/日常五种，每种给节奏/感受/禁忌）
 - **文风圣经注入**：每轮从 session 读取，确保整个副本文风一致
-- **意象追踪注入**：每轮从 session 读取，叙事AI被鼓励使用并赋予新含义
-- **创作思考指南**：利用 thinking mode 在动笔前做5项创作决策
-- **3个Few-shot示例**：入场/对话/战斗场景的优秀叙事参考
+- **意象追踪注入**：每轮从 session 读取，出现即可、一笔带过，不围着它写段
+- **创作思考指南**：利用 thinking mode 在动笔前做5项事件驱动的决策
+- **3个白话Few-shot示例**：入场/对话/战斗场景的可读叙事参考
 
 ### 数据流图
 
@@ -216,7 +262,7 @@ Layer 2（叙事AI，每轮）    → 基于种子续写，受文风圣经/意�
 
 ### 为何由导演AI分档（而非分类AI）
 
-分档取决于**后果规模**（是否玩家抉择点、主线推进、tension、大事件连锁），这些都是**导演AI的输出**，分类AI在掷骰前看不到结果；且“分档”与“章节档解除克制”本质是同一个动作。故 v1 由导演AI单点决策。
+分档取决于**后果规模**（主线推进、tension、大事件连锁、关键揭示），这些都是**导演AI的输出**，分类AI在掷骰前看不到结果；且“分档”与“章节档解除克制”本质是同一个动作。故 v1 由导演AI单点决策。（v4.9.1 起 `player_choice_point` 不再作为 chapter 触发条件——它只标记“重大抉择点”供书记官选项节奏档使用，与叙事长度解耦）
 
 ### 三档定义
 
@@ -224,20 +270,20 @@ Layer 2（叙事AI，每轮）    → 基于种子续写，受文风圣经/意�
 |------|----------|----------|----------|
 | `micro` | 普通对话 / 观察 / 日常琐事 | 200-600 | 单次生成 |
 | `normal` | 探索推进 / 遭遇 / 支线事件 | 600-1200 | 单次生成 |
-| `chapter` | 重大决策 / 主线节点 / 战斗高潮 / 剧情转折 | 1800-3000 | **分段生成** |
+| `chapter` | 主线节点 / 战斗高潮(tension≥8) / 重大转折·关键揭示 / [推进型行动] | 1800-3000 | **分段生成** |
 
 代码层 `AiCoordinatorService.ResolveNarrativeWordTarget` 按档位分层钳制字数（硬顶 800→3000）；未给 `beat_scale` 时回退到场景类型默认值。
 
-### 章节档分段生成（逐分镜调用）
+### 章节档分段生成（逐分段调用）
 
-chapter 档时导演额外输出 `beats`（4-8 个有序子节拍，每个含 `seed`/`beat_type`/`focus`）。`NarrativeAiService` 按分镜逐段调用模型：
+chapter 档时 GM 额外输出 `beats`（4-8 个有序子节拍，每个含 `seed`/`beat_type`/`focus`，seed 写法同 narrative_seed）。`NarrativeAiService` 按分段逐段调用模型：
 
 ```
 chapter 档：
   totalTarget = clamp(narrative_word_target, 1800, 3000)
   perBeat = max(300, totalTarget / beats.Count)
   for each beat_i in beats:
-      messages = 突出本分镜 seed + 附整章蓝图 + 已写正文（末尾≤1200字）
+      messages = 突出本段细纲 seed + 附整章总细纲 + 已写正文（末尾≤1200字）
       stream/非stream 调用模型（目标 perBeat）
       逐 chunk yield，段间插入空行
 ```
@@ -245,9 +291,9 @@ chapter 档：
 - **连贯性**：前序正文作为上下文注入下一段，仅取末尾约 1200 字防止上下文膨胀。
 - **零侵入**：Hub 与前端消费的仍是同一个流式 chunk 流，分段逻辑完全封装在 `NarrativeAiService` 内部，流式 / 非流式两条路径均支持。
 
-### 章节档导演主动性（解除克制）
+### 章节档GM主动性（解除克制）
 
-chapter 档允许导演**主动制造大事件**（升级冲突 / 引入转折 / 驱动 NPC 重大行动），让「一章」真正有戏。保留两条底线：不替玩家做抉择；后果与判定结果/世界状态一致。
+chapter 档允许 GM **主动制造大事件**（升级冲突 / 引入转折 / 驱动 NPC 重大行动），让「一章」真正有戏。保留两条底线：不替玩家做抉择；后果与判定结果/世界状态一致。
 
 > 叙事字数参数详见 [叙事设计规范](narrative-design.md) 的「叙事长度控制」章节。
 
@@ -283,6 +329,23 @@ chapter 档允许导演**主动制造大事件**（升级冲突 / 引入转折 /
 
 **章节档统一实时流式**：L1 下预计算不再产出任何叙事正文，`micro`/`normal`/`chapter` 三档**点选后一律走 `StreamNarrativeLiveAsync` 实时流式**（章节档内部仍按 `beats` 逐分镜续写，详见「章节档分段生成」）。旧 L3 的「章节档预取前 N 段 + 断点续写」机制（`ChapterPrefetchBeats` / `StreamChapterContinuationAsync` / `PrecomputedActionCache.NextBeatIndex`）**在 L1 下不再被点选路径调用——保留代码但不启用**。
 
+### VIP模式（v4.9.0：按需 L3、预生成叙事秒回放）
+
+L1 把叙事延迟交给「点选后实时流式 + 玩家阅读」掩盖，但首 token 仍有几秒延迟。**VIP模式** 是一个会话级手动开关（`IsVipMode`，前端 `StatusPanel` 下拉菜单 ⚡ 按钮切换，不持久化），开启后对 VIP 会话**按需把预计算深度从 L1 升回 L3**：预计算在导演层之后额外调 `NarrativeAiService.GenerateNarrativeAsync`（非流式，内部自动处理章节档整章生成）预生成叙事正文，写入 `PrecomputedActionCache.NarrativeText`（L1 改造后废弃但保留的字段）。点选时：
+
+- **`cached.NarrativeText` 非空** → `StreamNarrativeAsync` 文本回放（首字延迟≈0，不消耗额外叙事 token）
+- **为空（非VIP / VIP预生成未就绪 / 预生成失败 / 不可行短路）** → 自动降级 `StreamNarrativeLiveAsync` 实时流式（保证不卡住）
+
+| 维度 | L1（默认） | VIP（按需 L3） |
+|------|-----------|----------------|
+| 预计算深度 | 仅导演层 | 导演 + 叙事全文 |
+| 就绪时刻 | ~15s | ~35s |
+| 点选后叙事 | 实时流式（首token几秒） | 文本回放（首字≈0） |
+| 未选选项浪费 | 书记官（小） | 整段叙事调用（token约翻倍） |
+| 未就绪时 | — | 降级实时流式 |
+
+**与 L3 旧方案的区别**：VIP 不启用旧 L3 的章节档「预取前N段+断点续写」，而是用 `GenerateNarrativeAsync` 一次性生成整段正文后回放，逻辑更简单。开关透传链与 `IsAdultMode` 同构：经4个输入DTO透传，4处预计算入口（常规轮/缓存轮记账链尾、开场轮、重新开始轮）均带上 `IsVipMode`；`ProcessRestartSessionAsync` 签名加 `bool isVip`。**边界**：自由输入无预计算仍实时流式；不可行短路不预生成。
+
 ### 时序图（L1）
 
 ```
@@ -315,7 +378,7 @@ chapter 档允许导演**主动制造大事件**（升级冲突 / 引入转折 /
 ### DryRun模式
 
 `ProcessActionInput` 新增 `DryRun` 布尔标志。`DryRun=true` 时：
-- AI管线运行到**导演层**（分类、骰子、前台导演执行）；书记官 fire-and-forget 启动（`result.ScribeTask`）但**预计算不 await**；**叙事不生成**（L1 下改由点选后实时流式）
+- AI管线运行到**导演层**（分类、骰子、前台导演执行）；书记官 fire-and-forget 启动（`result.ScribeTask`）但**预计算不 await**；**叙事不生成**（L1 下改由点选后实时流式）。**VIP模式例外**（v4.9.0）：`isVip=true` 时在 DryRun 导演层之后额外调 `GenerateNarrativeAsync` 预生成叙事正文写入 `NarrativeText`（供点选秒回放），仍不落库
 - **跳过所有数据库写入**：骰子记录、装备耐久扣除、世界状态变更、道具获取/消耗、NPC态度更新、时段推进、交互计数、紧张度（书记官输出仅回填到结果对象，不调 `ApplyChangesAsync`）
 - 返回 `GameActionResult`（含 NarrativeInput、DiceResult、StateChanges、**ScribeTask 句柄**；ScribeOutput/ItemHints/SuggestedActions 待点选时 await 书记官后回填）
 - `SkillCheckAsync` 新增 `dryRun` 参数，DryRun时计算骰子结果但不写DB、不扣装备耐久
@@ -331,7 +394,7 @@ public class PrecomputedActionCache
     public string Hint { get; set; }              // 方向提示
     public GameActionResult? Result { get; set; } // 预计算结果（L1：含 NarrativeInput + ScribeTask 句柄）
     public bool IsFeasible { get; set; }          // 是否可行（不可行短路时=false，点选置灰）
-    public string NarrativeText { get; set; }     // 【L1 废弃】恒为 ""（叙事改点选后实时流式）
+    public string NarrativeText { get; set; }     // 【L1 废弃、VIP复用】非VIP恒为 ""；VIP模式预生成的叙事正文，点选时秒回放
     public int NextBeatIndex { get; set; }        // 【L1 废弃】恒为 -1（章节档统一实时流式）
     public DateTime CreatedAt { get; set; }       // 创建时间（1天TTL）
 }
@@ -408,7 +471,9 @@ public class SessionActionCache
 - **开场类场景**通过 `GenerateSuggestionsOnlyAsync(sessionId, playerAction, directorFacts, characterName)` 生成（自建 scope 调 `ScribeAsync`，失败返回 null 降级、不阻断副本启动）；装配由 `BuildSuggestionsOnlyInputAsync` 完成：以开场叙事为 `[本轮既定事实]`，保留主线目标引导选项朝主线推进，不暴露支线/隐藏内容避免剧透。生成后与常规轮一致：持久化 `LastSuggestedActions` + 启动预计算 + 推送选项。
 - **不可行短路**复用 `RunScribeTaskAsync`（已有 `result` 对象），以拒绝叙事为既定事实产出「补救方向」选项；仅真实行动（`!DryRun`）时生成，预计算 DryRun 只关心可行性判定无需补救选项。
 
-**刻意无选项的场景**（设计接受，不补）：成人轮（`IsAdult`）、背包超载（≥100% 入口阻断）、缓存未命中且选项文本不可得（旧客户端）、副本结束态（完成/放弃/死亡）。
+**成人轮（`IsAdult`）**：v4.6.0 起走完整链路，书记官（`scribe_adult_system` / `scribe_adult_suggestions_system`）照常产出2个选项并推送；**v4.8.0 起同样做预计算**（预计算继承会话级成人模式 `input.IsAdultMode`，用成人模型预掷，点选秒响应），与常规轮完全一致。切换成人模式后当前缓存选项按旧模式回放（最多一轮过渡），下一次预计算起切换。
+
+**刻意无选项的场景**（设计接受，不补）：背包超载（≥100% 入口阻断）、缓存未命中且选项文本不可得（旧客户端）、副本结束态（完成/放弃/死亡）。
 
 至此，除上述刻意场景外，**全场景每轮均产出2个行动选项**。
 
@@ -500,10 +565,10 @@ public class SessionActionCache
 |------|--------|------|
 | 三态可行性门卫 + 是否需要检定 + 技能 + DC + 优劣势 | 分类AI | `feasibility` + `judgment` JSON |
 | D20掷骰 + 调整值计算 + DC比较 | 代码层（规则引擎） | `GameDiceRollRecord` |
-| 基于成败的叙事种子 + 世界反应 + 节奏决策 | 前台导演AI | `DirectorOutput`（无状态字段） |
+| 基于成败的剧情细纲 + 世界反应 + 节奏决策 | 前台导演AI（GM） | `DirectorOutput`（无状态字段） |
 | 依既定事实产出状态账目 + 物资清单 + 建议选项 | 书记官AI | `ScribeOutput` |
 | 依蓝图记账落库（背包/已知情报） | 道具AI（物资官） | `LedgerDelta` |
-| 将蓝图转化为沉浸文本 | 叙事AI | 流式文本 |
+| 将细纲写成正文 | 叙事AI | 流式文本 |
 
 ### DC合法性校验
 
@@ -537,6 +602,8 @@ public class SessionActionCache
 | **Narrative** | `deepseek-v4-flash` | 0.85 | true | 真·文学创作场景，思考链有实质收益；流式推送下延迟被玩家阅读掩盖 |
 | **Architect** | `qwen3.7-max` | 0.8 | true | 一次性生成完整副本（耗时 120-150s 可接受），强规划能力有真实收益 |
 | **AdultNarrative** | `grok-4-latest`（Poixe） | 0.85 | true | 成人叙事专用通道 |
+| **AdultDirector**（前台） | `grok-4-latest`（Poixe） | 0.7 | true | 成人轮前台导演（v4.6.0），与 Director 同职责、仅模板/模型不同 |
+| **AdultScribe** | `grok-4-latest`（Poixe） | 0.3 | true | 成人轮书记官（v4.6.0），完整记账与仅选项两模板共用此模型 |
 
 - 思考模式取舍原则：**关键路径上的角色一律关思考**，仅叙事/建筑师等“延迟可被掩盖或离线”的角色保留思考链
 - 缺少配置节点时 `AiModelFactory` 回退为 `qwen-plus` + 思考 ON，**新增角色必须同步补配置**（否则静默跑成高延迟路径）
@@ -790,7 +857,12 @@ public class SessionActionCache
 
 | 版本 | 日期 | 变更类型 | 说明 |
 |------|------|----------|------|
-| 4.4.2 | 2026-09-16 | **提示词调优** | 书记官选项接住导演引导线索：`scribe_system.txt`「两档通用规则」新增一条——既定事实中的「引导线索」（`BuildDirectorFacts` 将导演 `narrative_hooks` 拼入的段落）是导演埋的方向暗示，两选项至少一个顺线索延伸，多线索时分别对应两条（细粒度档抉择点各线索对应不同岔路），单线索时另一选项给不同方向，禁止同跟一条；规则以“含`引导线索:`一行”为前置条件（该段仅 `NarrativeHooks.Count>0` 时才拼接），无该行时按其余既定事实与世界状态自然延伸，两种情况均自洽。背景：导演模板 `player_choice_point` 规则早已要求“hooks 输出各选项的隐含暗示”，但书记官侧从未有读取指令，hooks 只以隐性路径影响选项（“查看手机短信”反复出现即此路径的副作用）。防黏着规则（上轮未选的线索换切入）待定，硬保证需向 `ScribeInput` 注入 `LastSuggestedActions`。同批：删已废弃的 `director_system.txt`（无代码加载，含 5 份 bin 副本；csproj 通配符复制无需改）；`director_front_system.txt` 123→122 行（删纯旁白“这四层信息让叙事AI能写出…”）；`scribe_system.txt` 99→98 行（“未变化字段不输出（代码层保留上一轮值）”并入总规则删重复行；删 item_hints 字段清单行（schema 已列全、“物资官补全数值”已述）；schema `action_text` “15字内”改“字数见节奏档规则”，消除与粗粒度档 20 字的矛盾）。已核实保留：L63 位置变化影响优劣势（分类AI读世界状态定 advantage）、隐藏支线先 unlocked 后 completed 的顺序约束、“选中后导演一次性推演”依据句 |
+| 4.9.1 | 2026-09-22 | **提示词调优** | `player_choice_point` 与 `beat_scale` 解耦 + 判定收紧（`director_front_system.txt` / `director_adult_front_system.txt`）：①删除「`player_choice_point=true`→强制 chapter」触发条件，`player_choice_point` 不再影响叙事分档，仅作书记官选项节奏档（`IsKeyMoment`）判据之一；`beat_scale` 分档依据回归内容分量（主线节点/tension≥8/重大转折·关键揭示/[推进型行动]）。②`player_choice_point` 语义明确为「有实质后果、改变剧情走向的重大抉择点」，默认 false，true 条件加不可逆后果限定，新增负面清单（普通寒暄询问/无分歧常规推进轮/`tension<6` 无转折普通轮/可自由输入常规行动轮一律 false）。背景：原「任一条件满足即 true」过宽，紧张度 5~6 的普通轮也频繁置 true 并顶成 chapter，使选项几乎恒为细粒度、粗粒度推进档形同虚设。代码层 `AiCoordinatorService.IsKeyMoment` 未改动 |
+| 4.9.0 | 2026-09-19 | **性能/体验** | VIP模式（预计算阶段预生成叙事、点选秒回放）：新增会话级手动开关 `IsVipMode`（前端 `StatusPanel` 下拉菜单 ⚡ 按钮切换、`gameStore.isVipMode`，不持久化、刷新归零，与 `IsAdultMode` 同构）。开启后预计算在导演层之后额外调 `NarrativeAiService.GenerateNarrativeAsync`（非流式，内部自动处理章节档）预生成叙事正文，写入 `PrecomputedActionCache.NarrativeText`（复用 L1 改造后废弃字段），相当于对 VIP 会话按需把预计算深度从 L1 升回 L3。点选时 `ProcessSelectCachedActionAsync` 优先判 `cached.NarrativeText` 非空→`StreamNarrativeAsync` 文本回放（首字延迟≈0），为空（非VIP/未就绪/预生成失败/不可行短路）→降级 `StreamNarrativeLiveAsync` 实时流式。`PrecomputeAsync`/`PrecomputeSingleOptionAsync` 加 `bool isVip`；`IsVipMode` 经4个输入DTO（`PlayerActionInput`/`SelectCachedActionInput`/`SelectDungeonInput`/`RestartSessionInput`）透传，4处预计算入口（常规轮/缓存轮记账链尾、开场轮、重新开始轮）均带上，`ProcessRestartSessionAsync` 签名加 `bool isVip`。代价：叙事 token 约翻倍（2选项各生成一次只用1个）+ 就绪 ~15s→~35s。边界：自由输入无预计算仍实时流式。编译验证：后端 0 错误 / 30 既有警告未新增，前端 `vue-tsc` EXIT=0 |
+| 4.8.0 | 2026-09-19 | **机制对齐** | 成人轮预计算继承会话级成人模式（对齐世界难度 override 的“下一轮预计算起生效”语义）：废除 v4.6.0“成人轮不做预计算”门控，`PrecomputeAsync`/`PrecomputeSingleOptionAsync` 新增 `bool isAdult` 参数透传到 `ProcessActionInput.IsAdultMode`；`GameSessionHub` 两处预计算启动点传 `input.IsAdultMode`，成人轮用成人模型（`AdultClassifier`→`AdultDirector`）预掷、缓存 `NarrativeInput.IsAdult=true` 蓝图与 `AdultScribe` 书记官任务，点选按 `IsAdult` 选 `AdultNarrative`；删除两处“成人轮直接推送选项”的 else if 分支；`LastSuggestedActions` 持久化仍跳过成人轮。切换后当前缓存选项按旧模式回放（最多一轮过渡），下一次预计算起全链路切换；开场轮固定传 `false` |
+| 4.7.0 | 2026-09-18 | **机制重定义** | 玩家自由输入语义重定义（目标声明制）：前端自由输入框不再作为“本轮行动”进入分类/导演/叙事链路，而是作为“中长期目标声明”仅写库（不触发任何AI、不失效预计算缓存、不刷新当前选项）；下一轮书记官构造 `ScribeInput` 时读取 `GameDungeonSession.CurrentPlayerGoal` 填入 `PlayerGoal`，`ScribeAiService` 在 `[本轮既定事实]` 后、`[选项节奏档]` 前注入 `[玩家当前目标]` 消息对，让产出的 `suggested_actions` 围绕目标生成。后端：`GameDungeonSession` 新增 `CurrentPlayerGoal` 列（nvarchar(max) nullable）；`GameHubDtos` 新增 `SetPlayerGoalInput`；`GameSessionHub` 新增 `SetPlayerGoal` 方法（写库+200字兼底截断+推送 info 反馈）；`ScribeInput` 新增 `PlayerGoal`；`AiCoordinatorService` 常规路径与 `BuildSuggestionsOnlyInputAsync` 两处注入；4 个书记官模板各加一条“两档通用规则”；`DungeonReadyDto`/`ActiveSessionCheckOutput` 同步回填 `CurrentPlayerGoal` 支持断线续玩/跨设备一致性。前端：`types/game.ts` `DungeonReady`/`ActiveSessionResult` 加 `currentPlayerGoal`；`gameStore` 新增 `currentGoal` ref 接入 localStorage 持久化 + `setCurrentGoal`/`clearCurrentGoal` actions；`useSignalR` DungeonReady 回调从服务端回填；`useGameSession` 新增 `setGoal`/`clearGoal` 包装（乐观更新）；`PlayerInput.vue` 新增目标 chip（🎯 当前目标 {text} ×）+ 100 字硬上限 + placeholder 改为“表达你的意图或目标…”；`GameMain.vue` 自由输入回调改绑 `setGoal`（`sendAction` 仅供服务端推送的 choice 按钮使用）。**不新增 AI 节点、不新增链路**；Hub `PlayerAction` 方法保留仅供 `SelectCachedAction` 缓存未命中回退路径内部使用。编译验证：后端 0 错误 / 79 既有警告未新增，前端 `vue-tsc` EXIT=0 |
+| 4.5.0 | 2026-09-18 | **框架重构** | 网文优先（去电影感）：前台导演提示词角色 TRPG导演(DM)→游戏主持人(GM)（代码组件名 `Director`/`director_front_system.txt` 不变，仅模型可见词变）；`narrative_seed` 文学场景速写→剧情细纲（时间顺序事件条目+NPC台词大意+玩家状态变化），叙事AI据细纲从零写正文而非扩写散文（根治散文种子扩写4倍必注水为描写）；`prose_guidance` 句式节奏+感官重点+文学手法→叙事节奏+玩家情绪落点+必须写清的信息，禁慢镜头/特写/碎片化；`beats` 分镜表→分段细纲；叙事AI创作三原则→写作四原则+可量化硬性禁令，并删除第7条书面腔词汇禁令；场景文风模块重写为节奏/感受/禁忌；建筑师 style_bible 禁用电影/文学流派当语调；整链（含书记官/物资官/分类AI/评测集）移除电影术语。代码侧：`NarrativeAiService`（BuildSceneStyleModule 重写、BuildChapterBeatMessages/BuildBlueprintText/BuildProseGuidanceText 标签改细纲）、`AiCoordinatorService.BuildDirectorFacts`、`DirectorAiService` 注入消息、`ScribeAiService`/`QuartermasterAiService` 标签、`DirectorSuite`/`DirectorOutput` 同步。所有 JSON 键名保留不变，代码解析/日志/评测兼容。详见 [叙事设计规范 v2.5.0](narrative-design.md) |
+| 4.4.2 | 2026-09-16 | **提示词调优** | 书记官选项接住导演引导线索：`scribe_system.txt`「两档通用规则」新增一条——既定事实中的「引导线索」（`BuildDirectorFacts` 将导演 `narrative_hooks` 拼入的段落）是导演埋的方向暗示，两选项至少一个顺线索延伸，多线索时分别对应两条（细粒度档抉择点各线索对应不同岔路），单线索时另一选项给不同方向，禁止同跟一条。背景：导演模板 `player_choice_point` 规则早已要求“hooks 输出各选项的隐含暗示”，但书记官侧从未有读取指令，hooks 只以隐性路径影响选项。同批：删已废弃的 `director_system.txt`（含 5 份 bin 副本）；`director_front_system.txt`/`scribe_system.txt` 去重复行 |
 | 4.4.1 | 2026-09-16 | **瘦身重构** | 前台导演提示词瘦身第二批（`director_front_system.txt` 132→123 行）：① 删 `[常规行动]` 规则——掷骰条件只看 `Judgment.Needed && Skill && Dc>0` 不看 IsRoutine，该标记可与 `[判定结果]` 共现而对撞，且“无[判定结果]时直接描述”已覆盖其语义；连带清 `DirectorInput.IsRoutine`、`DirectorAiService.routineTag`、`DirectorSuite` 透传、`DirectorInputCase.IsRoutine`、`director.json` 8 处 `is_routine` 键（分类侧 `ClassificationResult.IsRoutine` 保留）；② 删同义反复的 `tension_level反映当前剧情紧张程度` 与重复的 `只输出结构化JSON`；③ `主线进度利用规则` 并入 `主动引导规则`，“让导演自己数 change_history 连续3轮”改为响应 `[剧情推进提示]`（`DetectStagnationAsync` 已做同一检测，去双轨）；④ schema 内联说明与写作规则段去双写（narrative_seed/prose_guidance/dialogue_direction 内联只留一句定位，细则保留在规则段；`beat_scale` 内联尾句与 L3/「判定次序」重复，删）；⑤ 新增 `[支线任务清单]`/`[隐藏内容清单]` 使用规则（此前每轮注入但零规则；`DirectorAiService`/`DirectorInput` “供导演标记完成时精确匹配”的过时注释同步改正）。保留：`[推进型行动]` 三处强制表述（v4.3.x 为解决导演不升 chapter 有意加的冗余）、引号约束（`RepairUnescapedQuotes` 仅是启发式兜底） |
 | 4.4.0 | 2026-09-16 | **瘦身重构** | 前台导演瘦身：整链拆除 `needs_state_change`。该字段在 v4.0.0 拆出书记官后失去记账字段排除的标的，v4.3.0 后又失去书记官分流的标的，全链路仅剩两处消费：导演 `[无需状态变更]` 标记（字段白名单漏列 `beat_scale`/`narrative_word_target`/`beats`，反而误导导演省略档位字段）与时段推进门控（导演模板自身已约束简单观察不推进，双重门控无增量保险）。移除：`classifier_system.txt` 「三、是否需要状态变更」与输出键（后续节重编号）；`ClassificationResult`/`DirectorInput`/`GameActionResult.NeedsStateChange`；`ActionClassifierService` 解析与日志；`DirectorAiService` 的 `stateChangeTag`；`director_front_system.txt` 的 `[无需状态变更]` 规则；`AiCoordinatorService` 时段推进改为 `if (directorOutput.TimeAdvance)`；AIEval `DirectorInputCase.NeedsStateChange` 与 `director.json` 的 8 处用例键。行为变化仅一处：`time_advance` 不再被上游分类误判吞掉，`[推进型行动]` 的时段推进得以稳定生效 |
 | 4.3.0 | 2026-09-16 | **缺陷修复** | 书记官常规轮始终完整记账：移除纯叙事轮（`NeedsStateChange=false`）的 SuggestionsOnly 分流，所有经过导演蓝图的轮次一律走完整书记官（接收全量上下文、产出全部结构化字段）；`ApplyCachedActionResultAsync` 移除 `NeedsStateChange` 门控（改为只要 `ScribeOutput.WorldStateChanges != null` 就落库）；SuggestionsOnly 仅保留给无导演蓝图的场景（开场轮/不可行短路）。根治「信息获取类行动未记账 → 叙事层与世界状态层脱节 → 后续轮次导演覆盖前轮剧情」的连贯性 bug |

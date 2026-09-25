@@ -251,7 +251,9 @@ public class DungeonExploreService : IDynamicApiController, ITransient
                 IsInCombat = character?.IsInCombat ?? false
             },
             RecentNarratives = recentNarratives,
-            SuggestedActions = suggestedActions
+            SuggestedActions = suggestedActions,
+            // 玩家当前目标（断线续玩时同步给前端，用于渲染目标chip与清空按钮）
+            CurrentPlayerGoal = session.CurrentPlayerGoal ?? ""
         };
     }
 }

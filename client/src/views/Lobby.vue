@@ -46,6 +46,7 @@ async function resumeDungeon() {
       sessionId: activeSession.value.sessionId.toString(),
       worldInfo: activeSession.value.worldInfo,
       gameState: activeSession.value.gameState,
+      currentPlayerGoal: activeSession.value.currentPlayerGoal ?? '',
     })
 
     // 恢复叙事历史

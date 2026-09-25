@@ -34,10 +34,10 @@ public class NarrativeInput
     /// <summary>玩家角色名称（供叙事AI在NPC对话等场景中正确称呼玩家）</summary>
     public string CharacterName { get; set; } = "";
 
-    /// <summary>是否为成人内容叙事（跳过导演AI，使用独立提示词）</summary>
+    /// <summary>是否为成人内容叙事（为true时切换 narrative_adult_system 模板与 AdultNarrative 模型，同样据导演蓝图写正文）</summary>
     public bool IsAdult { get; set; }
 
-    /// <summary>玩家行动文本（成人内容时直接传递给叙事AI，替代导演蓝图）</summary>
+    /// <summary>玩家行动文本（历史字段；成人轮现已改为消费导演蓝图，不再依赖此字段）</summary>
     public string PlayerAction { get; set; } = "";
 
     /// <summary>文风圣经（建筑师AI一次性生成，每轮注入，提供语调/句式/感官调色板/禁用陈词）</summary>

@@ -84,8 +84,22 @@ public class ScribeInput
     public bool SuggestionsOnly { get; set; }
 
     /// <summary>
+    /// 是否为成人内容轮（成人模式开启或分类判定为成人）。
+    /// true 时切换为成人版提示词模板与 AdultScribe 模型配置：完整记账轮用 scribe_adult_system，
+    /// SuggestionsOnly 轻量轮用 scribe_adult_suggestions_system，其余链路与正常轮一致。
+    /// </summary>
+    public bool IsAdult { get; set; }
+
+    /// <summary>
     /// 选项节奏档位：true=关键时刻（导演判定抉择点/章节档/高紧张），输出细粒度慢节奏选项；
     /// false=非关键时刻，输出粗粒度剧情推进型选项（选中后可驱动导演大幅推演剧情）。
     /// </summary>
     public bool IsKeyMoment { get; set; } = true;
+
+    /// <summary>
+    /// 玩家当前目标（自由输入框提交的中长期意图，非本轮行动）。
+    /// 非空时ScribeAiService会注入[玩家当前目标]消息对，书记官将其作为生成suggested_actions的方向依据（
+    /// 两个选项应共同服务于该目标，但不得脱离本轮既定事实与世界状态）。
+    /// </summary>
+    public string? PlayerGoal { get; set; }
 }

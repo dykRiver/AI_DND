@@ -7,7 +7,6 @@ import type {
   DiceResult,
   GameState,
   TimeTransition,
-  PlayerChoice,
   DangerousActionConfirm,
   CharacterCreateInput,
   GeneratingProgress,
@@ -100,16 +99,13 @@ export function useSignalR() {
       gameStore.setTimeTransition(transition)
     })
 
-    // 请求玩家选择
-    connection.value.on('RequestPlayerChoice', (choice: PlayerChoice) => {
-      gameStore.setChoice(choice)
-    })
-
     // ★ 副本就绪通知（后台生成完成后推送）
     connection.value.on('DungeonReady', (data: DungeonReady) => {
       gameStore.setSession(data.sessionId.toString())
       gameStore.setWorldInfo(data.worldInfo)
       gameStore.updateGameState(data.gameState)
+      // 同步玩家当前目标（断线恢复/重新开始时服务端回填；新建副本时为空字符串，相当于清空本地目标）
+      gameStore.setCurrentGoal(data.currentPlayerGoal ?? '')
       gameStore.setLoading(false)
       onDungeonReadyCallback.value?.(data)
     })
@@ -227,6 +223,21 @@ export function useSignalR() {
       sessionId: Number(sessionId),
       actionText,
       isAdultMode,
+      // 世界难度调整模式：开启时传玩家数值，关闭时传 null（后端回退模板难度）
+      worldDifficultyOverride: gameStore.worldDifficultyOverride,
+      // VIP模式：透传会话级开关，供本轮结束时启动的下一轮预计算预生成叙事
+      isVipMode: gameStore.isVipMode,
+    })
+  }
+
+  /// 设置玩家当前目标（自由输入框新语义：中长期意图声明，非本轮行动）
+  /// 不触发任何AI链路、不失效预计算缓存、不刷新当前选项；仅写库+推送一条info反馈消息
+  async function setPlayerGoal(sessionId: string, goalText: string) {
+    if (!connection.value || !isConnected.value) return
+    // fire-and-forget：反馈通过ReceiveSystemMessage推送
+    await connection.value.send('SetPlayerGoal', {
+      sessionId: Number(sessionId),
+      goalText,
     })
   }
 
@@ -242,6 +253,10 @@ export function useSignalR() {
       optionIndex,
       actionText,
       isAdultMode: gameStore.isAdultMode,
+      // 世界难度调整模式：回退常规全链路时仍需带上玩家设定的难度修正
+      worldDifficultyOverride: gameStore.worldDifficultyOverride,
+      // VIP模式：缓存未命中回退时透传给下一轮预计算
+      isVipMode: gameStore.isVipMode,
     })
   }
 
@@ -259,6 +274,8 @@ export function useSignalR() {
       intelligence: input.intelligence,
       wisdom: input.wisdom,
       charisma: input.charisma,
+      // VIP模式：开场轮预计算预生成叙事，点选时秒出
+      isVipMode: gameStore.isVipMode,
     })
   }
 
@@ -314,6 +331,8 @@ export function useSignalR() {
     // fire-and-forget：只发送请求，结果通过 DungeonReady 事件推送回来
     await connection.value.send('RestartSession', {
       sessionId: Number(sessionId),
+      // VIP模式：重新开始开场轮预计算预生成叙事，点选时秒出
+      isVipMode: gameStore.isVipMode,
     })
   }
 
@@ -324,6 +343,7 @@ export function useSignalR() {
     disconnect,
     destroy,
     sendPlayerAction,
+    setPlayerGoal,
     selectCachedAction,
     selectDungeon,
     onDungeonReady,

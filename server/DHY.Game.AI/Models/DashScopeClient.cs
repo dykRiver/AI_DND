@@ -239,6 +239,12 @@ public class DashScopeClient : IAiModelClient
         if (config.EnableThinking)
         {
             body["enable_thinking"] = true;
+
+            // 推理强度档位：仅在显式配置时作为顶层参数传递；未配置则不传，使用平台默认(high)
+            if (!string.IsNullOrWhiteSpace(config.ReasoningEffort))
+            {
+                body["reasoning_effort"] = config.ReasoningEffort;
+            }
         }
 
         if (config.MaxTokens > 0)

@@ -19,9 +19,6 @@ public interface IGameSessionHub
     /// <summary>时段转换过渡</summary>
     Task SendTimeTransition(TimeTransitionDto transition);
 
-    /// <summary>玩家选择点提示</summary>
-    Task RequestPlayerChoice(PlayerChoiceDto choices);
-
     /// <summary>副本世界生成进度</summary>
     Task DungeonGenerating(GeneratingProgressDto progress);
 

@@ -35,13 +35,16 @@ public class ActionClassifierService : ITransient
     /// <param name="currentState">当前状态描述</param>
     /// <param name="playerInventory">玩家背包摘要（供可行性判定）</param>
     /// <param name="npcProfiles">NPC档案摘要（供优劣势判定）</param>
+    /// <param name="isAdult">成人模式（前端会话级开关）：为true时切换 AdultClassifier 模型配置（Poixe/grok），分类提示词模板保持不变</param>
     /// <returns>分类结果</returns>
-    public async Task<ClassificationResult> ClassifyAsync(string playerInput, string currentState, string playerInventory = "", string npcProfiles = "")
+    public async Task<ClassificationResult> ClassifyAsync(string playerInput, string currentState, string playerInventory = "", string npcProfiles = "", bool isAdult = false)
     {
+        // 成人模式仅切换模型配置（AdultClassifier→Poixe/grok-4-latest），分类提示词模板仍用 classifier_system
+        var aiRole = isAdult ? "AdultClassifier" : "Classifier";
         try
         {
             if (_modelFactory.IsDebugEnabled)
-                AiDebugLogger.LogCallChain("Classifier", $"开始分类玩家输入: {playerInput}");
+                AiDebugLogger.LogCallChain(aiRole, $"开始分类玩家输入: {playerInput}");
 
             var systemPrompt = _promptService.LoadTemplate("classifier_system");
             var inventoryText = string.IsNullOrEmpty(playerInventory) ? "（无道具）" : playerInventory;
@@ -54,9 +57,9 @@ public class ActionClassifierService : ITransient
                 new() { Role = "user", Content = userContent }
             };
 
-            var config = _modelFactory.GetModelConfig("Classifier");
-            var client = _modelFactory.CreateClient();
-            var result = await client.ChatCompletionAsync(messages, config, aiRole: "Classifier");
+            var config = _modelFactory.GetModelConfig(aiRole);
+            var client = _modelFactory.CreateClient(config);
+            var result = await client.ChatCompletionAsync(messages, config, aiRole: aiRole);
 
             if (!result.IsSuccess)
             {
@@ -72,7 +75,7 @@ public class ActionClassifierService : ITransient
                 var judgmentDetail = j != null
                     ? $"Judgment(needed={j.Needed}, skill={j.Skill}, dc={j.Dc}, advantage={j.Advantage}, disadvantage={j.Disadvantage}, context={j.Context})"
                     : "Judgment=null";
-                AiDebugLogger.LogCallChain("Classifier", $"分类结果: IsRoutine={classificationResult.IsRoutine}, Feasibility={classificationResult.Feasibility}, IsAdult={classificationResult.IsAdult}, ActionIntent={classificationResult.ActionIntent}, Confidence={classificationResult.Confidence}, Reason={classificationResult.Reason}, {judgmentDetail}");
+                AiDebugLogger.LogCallChain(aiRole, $"分类结果: IsRoutine={classificationResult.IsRoutine}, Feasibility={classificationResult.Feasibility}, IsAdult={classificationResult.IsAdult}, ActionIntent={classificationResult.ActionIntent}, Confidence={classificationResult.Confidence}, Reason={classificationResult.Reason}, {judgmentDetail}");
             }
 
             return classificationResult;

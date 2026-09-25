@@ -32,7 +32,7 @@ public class ClassificationResult
     /// <summary>不可行原因（仅当 infeasible 时由AI输出）</summary>
     public string? InfeasibleReason { get; set; }
 
-    /// <summary>是否为成人色情内容（跳过导演AI，直接叙事）</summary>
+    /// <summary>是否为成人色情内容（为true时全链路切换成人版提示词模板与模型，仍走完整导演→叙事→书记官流程）</summary>
     public bool IsAdult { get; set; }
 
     /// <summary>行动意图提炼（标准化格式："行动类别·动词：目标描述"）</summary>

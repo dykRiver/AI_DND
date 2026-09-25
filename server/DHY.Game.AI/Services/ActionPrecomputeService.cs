@@ -27,7 +27,7 @@ public class PrecomputedActionCache
     /// <summary>预计算结果（含NarrativeInput、DiceResult、StateChanges等）</summary>
     public GameActionResult? Result { get; set; }
 
-    /// <summary>【L1改造后废弃】预生成叙事文本：叙事已改为点选后实时流式生成，此字段恒为空。</summary>
+    /// <summary>【L1改造后废弃、VIP模式复用】预生成叙事文本：非VIP恒为空（叙事点选后实时流式）；VIP模式在预计算阶段预生成的叙事正文，点选时秒回放。</summary>
     public string NarrativeText { get; set; } = "";
 
     /// <summary>【L1改造后废弃】章节档续写起始分镜索引：叙事统一点选后实时流式，此字段恒为 -1。</summary>
@@ -83,7 +83,9 @@ public class ActionPrecomputeService : ISingleton
     /// <summary>
     /// 并行预计算2个行动选项的完整AI流程（DryRun模式，不持久化）
     /// </summary>
-    public async Task PrecomputeAsync(long sessionId, List<SuggestedActionInfo> options)
+    /// <param name="isAdult">会话级成人模式：透传给预掷的 ProcessActionInput.IsAdultMode，使预计算按当前模式走成人/非成人全链路（对齐 worldDifficultyOverride 的“下一轮预计算起生效”语义）</param>
+    /// <param name="isVip">会话级VIP模式：开启后预计算在导演层之后额外调用叙事AI预生成叙事文本并缓存，点选时秒回放（代价：2个选项各生成一次，玩家只用1个，另1个叙事token浪费）</param>
+    public async Task PrecomputeAsync(long sessionId, List<SuggestedActionInfo> options, int? worldDifficultyOverride = null, bool isAdult = false, bool isVip = false)
     {
         if (options == null || options.Count < 2)
         {
@@ -118,7 +120,7 @@ public class ActionPrecomputeService : ISingleton
             var optionScale = sessionCache.Options[i].Scale;
             using (ExecutionContext.SuppressFlow())
             {
-                tasks[idx] = Task.Run(() => PrecomputeSingleOptionAsync(sessionId, optionActionText, idx, optionScale));
+                tasks[idx] = Task.Run(() => PrecomputeSingleOptionAsync(sessionId, optionActionText, idx, optionScale, worldDifficultyOverride, isAdult, isVip));
             }
         }
 
@@ -227,7 +229,7 @@ public class ActionPrecomputeService : ISingleton
     /// 预计算单个选项（在独立scope中执行，DryRun模式）
     /// </summary>
     private async Task<(GameActionResult? result, string narrativeText, int nextBeatIndex)> PrecomputeSingleOptionAsync(
-        long sessionId, string actionText, int optionIndex, string actionScale)
+        long sessionId, string actionText, int optionIndex, string actionScale, int? worldDifficultyOverride = null, bool isAdult = false, bool isVip = false)
     {
         using var scope = _scopeFactory.CreateScope();
         var aiCoordinator = scope.ServiceProvider.GetRequiredService<AiCoordinatorService>();
@@ -243,6 +245,10 @@ public class ActionPrecomputeService : ISingleton
                 SessionId = sessionId,
                 ActionText = actionText,
                 DryRun = true,
+                // 手动世界难度覆盖值透传：预掷的缓存选项也需带上玩家设定的难度修正
+                WorldDifficultyOverride = worldDifficultyOverride,
+                // 会话级成人模式透传：预掷按当前模式走成人/非成人全链路，使缓存的导演蓝图与模式一致
+                IsAdultMode = isAdult,
                 // 粗粒度推进选项：预演时就要让导演走章节档，否则缓存命中回放的仍是 normal 档结果
                 ActionScale = actionScale
             };
@@ -255,10 +261,32 @@ public class ActionPrecomputeService : ISingleton
             //    - 书记官：ProcessPlayerActionAsync 内已 fire-and-forget 启动（result.ScribeTask），此处保留句柄、不 await，
             //      让其后台与“就绪判定”并行完成；点选时再 await 回填 ScribeOutput/ItemHints/SuggestedActions。
             //      RunScribeTaskAsync 自建独立DI scope且自捕异常，句柄可安全跨请求存活到点选。
+            //
+            //    【VIP模式】在导演层之后额外预生成叙事文本并缓存，点选时秒回放（首字延迟≈0）。
+            //    代价：2个选项各生成一次叙事，玩家只点1个 → 另1个叙事token浪费；且就绪时刻回升到“导演+叙事”。
+            //    不可行短路（NarrativeInput=null）不预生成，点选时回放协调器已产出的拒绝文案。
+            string narrativeText = "";
+            if (isVip && result?.NarrativeInput != null)
+            {
+                try
+                {
+                    var narrativeAi = scope.ServiceProvider.GetRequiredService<NarrativeAiService>();
+                    narrativeText = await narrativeAi.GenerateNarrativeAsync(result.NarrativeInput, sessionId);
+                    _logger.LogInformation("VIP预生成叙事完成: SessionId={SessionId}, Option={Index}, 字数={Length}",
+                        sessionId, optionIndex, narrativeText?.Length ?? 0);
+                }
+                catch (Exception ex)
+                {
+                    // 预生成失败不影响预计算结果：narrativeText 保持空，点选时自动降级为实时流式
+                    _logger.LogWarning(ex, "VIP预生成叙事失败(点选时降级实时流式): SessionId={SessionId}, Option={Index}", sessionId, optionIndex);
+                    narrativeText = "";
+                }
+            }
+
             _logger.LogDebug("预计算完成(导演层): SessionId={SessionId}, Option={Index}, 可行={Feasible}",
                 sessionId, optionIndex, result?.NarrativeInput != null);
 
-            return (result, "", -1);
+            return (result, narrativeText, -1);
         }
         catch (Exception ex)
         {

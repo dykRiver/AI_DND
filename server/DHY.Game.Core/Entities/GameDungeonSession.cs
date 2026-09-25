@@ -127,4 +127,13 @@ public class GameDungeonSession : EntityBase
     /// </summary>
     [SugarColumn(ColumnDescription = "最后一轮建议行动JSON", ColumnDataType = "nvarchar(max)", IsNullable = true)]
     public string? LastSuggestedActions { get; set; }
+
+    /// <summary>
+    /// 玩家当前目标（自由输入框提交的中长期意图，非本轮行动）。
+    /// 覆盖式存储：每次玩家提交新目标覆盖旧值；不自动清空。
+    /// 书记官构造ScribeInput时读取本字段注入[玩家当前目标]，让下一轮suggested_actions围绕该目标生成。
+    /// 不参与分类/导演/叙事链路，也不触发缓存失效。
+    /// </summary>
+    [SugarColumn(ColumnDescription = "玩家当前目标", ColumnDataType = "nvarchar(max)", IsNullable = true)]
+    public string? CurrentPlayerGoal { get; set; }
 }

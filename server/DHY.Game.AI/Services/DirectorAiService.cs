@@ -43,20 +43,24 @@ public class DirectorAiService : ITransient
     public async Task<DirectorOutput?> DirectAsync(DirectorInput input, long? sessionId = null)
     {
         var sw = Stopwatch.StartNew();
-        var config = _modelFactory.GetModelConfig("Director");
+        var aiRole = input.IsAdult ? "AdultDirector" : "Director";
+        var config = _modelFactory.GetModelConfig(aiRole);
 
         if (_modelFactory.IsDebugEnabled)
         {
-            AiDebugLogger.LogCallChain("Director", $"开始导演AI推演, 玩家行动: {input.PlayerAction}");
+            AiDebugLogger.LogCallChain(aiRole, $"开始导演AI推演, 玩家行动: {input.PlayerAction}");
             // 控制台截断100字符，文件写完整世界状态
-            AiDebugLogger.LogCallChain("Director", $"世界状态摘要: {(input.WorldState?.Length > 100 ? input.WorldState[..100] + "..." : input.WorldState)}");
+            AiDebugLogger.LogCallChain(aiRole, $"世界状态摘要: {(input.WorldState?.Length > 100 ? input.WorldState[..100] + "..." : input.WorldState)}");
             GameFileLogger.Write("[AI链路][Director]", $"世界状态(完整): {input.WorldState}");
         }
 
         try
         {
             // 前台导演模板：只输出叙事推演字段，状态记账已拆给书记官(ScribeAiService)
-            var systemPrompt = _promptService.LoadTemplate("director_front_system");
+            // 成人轮切换为 director_adult_front_system，其余上下文构造与正常轮完全一致
+            var systemPrompt = _promptService.LoadTemplate(input.IsAdult ? "director_adult_front_system" : "director_front_system");
+            // 推进型行动规则块仅在玩家点选粗粒度推进选项（IsAdvanceAction）时相关，非推进型行动裁掉，减少无关指令与Token
+            systemPrompt = _promptService.ResolveConditionalBlock(systemPrompt, "ADVANCE_ACTION", input.IsAdvanceAction);
 
             // 构造上下文消息列表（按注意力权重排列，关键信息放最后）
             var messages = new List<ChatMessage>
@@ -191,9 +195,9 @@ public class DirectorAiService : ITransient
                 messages.Add(new ChatMessage
                 {
                     Role = "user",
-                    Content = "[推进型行动] 玩家选择的是一个粗粒度剧情推进方向，覆盖一段旅程/一个时段/一整段事件。本轮必须 beat_scale=chapter 并输出 beats 分镜表，一次性推演完整段推进，不得只推演第一步就收尾。"
+                    Content = "[推进型行动] 玩家选择的是一个粗粒度剧情推进方向，覆盖一段旅程/一个时段/一整段事件。本轮必须 beat_scale=chapter 并输出 beats 分段细纲，一次性推演完整段推进，不得只推演第一步就收尾。"
                 });
-                messages.Add(new ChatMessage { Role = "assistant", Content = "明白，本轮我将以章节档一次性推演完这整段推进，并输出 beats 分镜表。" });
+                messages.Add(new ChatMessage { Role = "assistant", Content = "明白，本轮我将以章节档一次性推演完这整段推进，并输出 beats 分段细纲。" });
             }
 
             // 玩家本次行动（最末尾，优先注意力）
@@ -207,13 +211,13 @@ public class DirectorAiService : ITransient
                 Content = $"{actionContent}\n\n请输出导演推演JSON:"
             });
 
-            var client = _modelFactory.CreateClient();
-            var result = await client.ChatCompletionAsync(messages, config, aiRole: "Director");
+            var client = _modelFactory.CreateClient(config);
+            var result = await client.ChatCompletionAsync(messages, config, aiRole: aiRole);
 
             sw.Stop();
 
             // 记录AI调用日志
-            await LogAiCallAsync(sessionId, config.ModelId, result, sw.ElapsedMilliseconds);
+            await LogAiCallAsync(sessionId, config.ModelId, result, sw.ElapsedMilliseconds, input.IsAdult);
 
             if (!result.IsSuccess)
             {
@@ -225,12 +229,12 @@ public class DirectorAiService : ITransient
 
             if (_modelFactory.IsDebugEnabled && directorOutput != null)
             {
-                AiDebugLogger.LogCallChain("Director", $"叙事种子: {(directorOutput.NarrativeSeed?.Length > 80 ? directorOutput.NarrativeSeed[..80] + "..." : directorOutput.NarrativeSeed)}");
-                AiDebugLogger.LogCallChain("Director", $"NPC行动数: {directorOutput.NpcActions?.Count ?? 0}");
+                AiDebugLogger.LogCallChain(aiRole, $"叙事种子: {(directorOutput.NarrativeSeed?.Length > 80 ? directorOutput.NarrativeSeed[..80] + "..." : directorOutput.NarrativeSeed)}");
+                AiDebugLogger.LogCallChain(aiRole, $"NPC行动数: {directorOutput.NpcActions?.Count ?? 0}");
                 if (directorOutput.Pacing != null)
-                    AiDebugLogger.LogCallChain("Director", $"节奏: 紧张度={directorOutput.Pacing.TensionLevel}, 备注={directorOutput.Pacing.Note}");
+                    AiDebugLogger.LogCallChain(aiRole, $"节奏: 紧张度={directorOutput.Pacing.TensionLevel}, 备注={directorOutput.Pacing.Note}");
                 if (!string.IsNullOrEmpty(directorOutput.ProseGuidance))
-                    AiDebugLogger.LogCallChain("Director", $"文风指导: {directorOutput.ProseGuidance}");
+                    AiDebugLogger.LogCallChain(aiRole, $"文风指导: {directorOutput.ProseGuidance}");
             }
 
             return directorOutput;
@@ -241,7 +245,7 @@ public class DirectorAiService : ITransient
             _logger.LogError(ex, "导演AI服务异常");
             await LogAiCallAsync(sessionId, config.ModelId, 
                 new AiCompletionResult { IsSuccess = false, ErrorMessage = ex.Message }, 
-                sw.ElapsedMilliseconds);
+                sw.ElapsedMilliseconds, input.IsAdult);
             return null;
         }
     }
@@ -333,14 +337,14 @@ public class DirectorAiService : ITransient
         return sb.ToString();
     }
 
-    private async Task LogAiCallAsync(long? sessionId, string modelName, AiCompletionResult result, long durationMs)
+    private async Task LogAiCallAsync(long? sessionId, string modelName, AiCompletionResult result, long durationMs, bool isAdult = false)
     {
         try
         {
             var log = new GameAiCallLog
             {
                 SessionId = sessionId,
-                AiType = "director",
+                AiType = isAdult ? "adult_director" : "director",
                 ModelName = modelName,
                 InputTokens = result.InputTokens,
                 OutputTokens = result.OutputTokens,

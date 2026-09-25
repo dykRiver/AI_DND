@@ -5,6 +5,12 @@ import HpBar from './HpBar.vue'
 
 const gameStore = useGameStore()
 
+// 世界难度调整：数值输入双向绑定（写入时经 store 做 -20~+20 clamp）
+const difficultyModel = computed({
+  get: () => gameStore.worldDifficultyValue,
+  set: (v: number) => gameStore.setWorldDifficultyValue(v),
+})
+
 const emit = defineEmits<{
   (e: 'reinit'): void
   (e: 'restart'): void
@@ -159,6 +165,39 @@ const tensionColor = computed(() => {
                   <span>{{ gameStore.isAdultMode ? '🔞' : '🔒' }}</span>
                   {{ gameStore.isAdultMode ? '成人模式 ON' : '成人模式 OFF' }}
                 </button>
+
+                <button
+                  @click="gameStore.toggleVipMode(); closeMenu()"
+                  class="w-full text-left text-sm px-4 py-2.5 hover:bg-gray-200 transition-colors flex items-center gap-2"
+                  :class="gameStore.isVipMode ? 'text-amber-600' : 'text-gray-500'"
+                >
+                  <span>⚡</span>
+                  {{ gameStore.isVipMode ? 'VIP模式 ON' : 'VIP模式 OFF' }}
+                </button>
+
+                <!-- 世界难度调整模式（不关闭菜单，方便开启后立即设定数值） -->
+                <button
+                  @click="gameStore.toggleWorldDifficultyMode()"
+                  class="w-full text-left text-sm px-4 py-2.5 hover:bg-gray-200 transition-colors flex items-center gap-2"
+                  :class="gameStore.worldDifficultyMode ? 'text-amber-600' : 'text-gray-500'"
+                >
+                  <span>⚖️</span>
+                  {{ gameStore.worldDifficultyMode ? '难度调整 ON' : '难度调整 OFF' }}
+                </button>
+                <div
+                  v-if="gameStore.worldDifficultyMode"
+                  class="px-4 py-2 flex items-center gap-2 text-xs text-gray-500"
+                >
+                  <span>判定修正</span>
+                  <input
+                    v-model.number="difficultyModel"
+                    type="number"
+                    min="-20"
+                    max="20"
+                    class="w-14 px-1 py-0.5 text-center text-sm bg-white border border-gray-300 rounded"
+                  />
+                  <span class="text-gray-400">-20~+20</span>
+                </div>
 
                 <!-- 分隔线 -->
                 <div class="border-t border-gray-200 my-1"></div>

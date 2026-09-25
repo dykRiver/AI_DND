@@ -72,6 +72,9 @@ public class ActiveSessionCheckOutput
     /// 内存预计算缓存命中→秒响应；未命中/过期→以 ActionText 走常规全链路。
     /// </summary>
     public List<ActiveSessionSuggestedAction> SuggestedActions { get; set; } = new();
+
+    /// <summary>玩家当前目标（断线续玩时同步给前端，用于渲染目标chip与清空按钮）</summary>
+    public string CurrentPlayerGoal { get; set; } = "";
 }
 
 public class ActiveSessionWorldInfo

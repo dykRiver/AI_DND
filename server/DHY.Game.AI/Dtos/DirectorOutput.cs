@@ -21,13 +21,13 @@ public class DirectorOutput
     public string BeatScale { get; set; } = "";
 
     /// <summary>
-    /// 章节分镜表（仅 beat_scale=chapter 时输出）：把这一章拆成若干有序子节拍，
-    /// 叙事AI按分镜逐段续写、拼成整章。非章节档时为 null。
+    /// 章节分段细纲（仅 beat_scale=chapter 时输出）：把这一章拆成若干有序子节拍，
+    /// 叙事AI按分段细纲逐段续写、拼成整章。非章节档时为 null。
     /// </summary>
     [JsonProperty("beats")]
     public List<ChapterBeatInfo>? Beats { get; set; }
 
-    /// <summary>文风指导（句式节奏+感官重点+文学手法，指导叙事AI的文风选择）</summary>
+    /// <summary>本轮写法提示（叙事节奏+玩家情绪落点+必须写清的信息，指导叙事AI写正文）</summary>
     [JsonProperty("prose_guidance")]
     public string ProseGuidance { get; set; } = "";
 

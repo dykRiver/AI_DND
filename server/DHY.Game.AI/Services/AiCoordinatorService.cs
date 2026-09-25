@@ -107,20 +107,9 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
         if (DebugEnabled)
             AiDebugLogger.LogOrchestration("开始处理玩家行动", $"SessionId={sessionId}, 输入={actionText}, 成人模式={input.IsAdultMode}");
 
-        // 0. 成人模式快捷通道：玩家手动开启，跳过分类AI和导演AI，直接走成人叙事
-        if (input.IsAdultMode)
-        {
-            if (DebugEnabled)
-                AiDebugLogger.LogOrchestration("成人模式快捷通道", "跳过分类AI和导演AI，直接走成人叙事");
-
-            var adultInventory = await BuildPlayerInventoryText(sessionId);
-            var adultNarrativeHistory = await _worldState.GetNarrativeHistoryAsync(
-                new NarrativeHistoryQueryInput { SessionId = sessionId, Count = 5 });
-
-            return await HandleAdultAction(sessionId, session, actionText, adultNarrativeHistory, adultInventory, characterName);
-        }
-
         // 1. 行动分类（含可行性判定 + 成人内容判定 + 技能判定）
+        //    成人模式（手动开启）不再走快捷通道：与正常轮走完全一致的分类→导演→叙事→书记官全链路。
+        //    分类AI按成人模式仅切换模型配置（AdultClassifier→Poixe，提示词模板不变）；导演/叙事/书记官三个AI按 isAdult 切换成人版提示词模板与模型配置。
         var classifierState = await _worldState.GetCurrentStateForClassifierAsync(sessionId);
         var playerInventory = await BuildPlayerInventoryText(sessionId);
         var knownAssets = await BuildKnownAssetsText(sessionId);
@@ -131,12 +120,16 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
         var npcs = await _npcService.GetCriticalNpcsAsync(sessionId);
         var npcProfiles = BuildNpcProfilesText(npcs);
         var allNarrativeHistory = await _worldState.GetNarrativeHistoryAsync(new NarrativeHistoryQueryInput { SessionId = sessionId, Count = 10 });
-        var classification = await _classifier.ClassifyAsync(actionText, classifierState, availableAssets, npcProfiles);
+        // 分类AI按会话级成人模式开关切换模型配置（此处只能用 input.IsAdultMode，classification.IsAdult 尚未产出）
+        var classification = await _classifier.ClassifyAsync(actionText, classifierState, availableAssets, npcProfiles, input.IsAdultMode);
+
+        // 成人内容判定：手动开启成人模式，或分类AI判定为成人。二者任一为真即走成人版全链路
+        var isAdult = input.IsAdultMode || classification.IsAdult;
 
         // 1.3 叙事历史过滤（成人→非成人转换时，跳过成人记录）
         var lastRecordIsAdult = allNarrativeHistory.FirstOrDefault()?.IsAdult ?? false;
         List<GameNarrativeLog> narrativeHistory;
-        if (!classification.IsAdult && lastRecordIsAdult)
+        if (!isAdult && lastRecordIsAdult)
         {
             var nonAdultRecords = allNarrativeHistory.Where(l => !l.IsAdult).ToList();
             if (nonAdultRecords.Count < 5)
@@ -191,19 +184,11 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             // ScribeTask 由 Hub 后台记账链 await 后回填 SuggestedActions 并启动预计算、推送选项。
             if (!input.DryRun)
             {
-                var rejectScribeInput = await BuildSuggestionsOnlyInputAsync(sessionId, actionText, rejectText, characterName);
+                var rejectScribeInput = await BuildSuggestionsOnlyInputAsync(sessionId, actionText, rejectText, characterName, isAdult);
                 rejectResult.ScribeTask = RunScribeTaskAsync(sessionId, rejectResult, rejectScribeInput, session.InteractionCount, false, npcs);
             }
 
             return rejectResult;
-        }
-
-        // 2. 成人内容短路：跳过导演AI，直接走叙事AI
-        if (classification.IsAdult)
-        {
-            if (DebugEnabled)
-                AiDebugLogger.LogOrchestration("行动分类", "成人内容 → 跳过导演AI，直接叙事");
-            return await HandleAdultAction(sessionId, session, actionText, narrativeHistory, playerInventory, characterName);
         }
 
         var isStagnant = await DetectStagnationAsync(sessionId);
@@ -237,16 +222,27 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             !string.IsNullOrEmpty(classification.Judgment.Skill) &&
             classification.Judgment.Dc > 0)
         {
-            // 查出副本世界难度修正
-            var difficultyModifier = 0;
-            var template = await _templateRep.GetByIdAsync(session.TemplateId);
-            if (template != null)
+            // 世界难度修正：手动调整模式开启时用玩家输入值（替换模板），否则回退副本模板难度
+            int difficultyModifier;
+            bool isManualDifficulty;
+            if (input.WorldDifficultyOverride.HasValue)
             {
-                difficultyModifier = template.DifficultyModifier;
+                difficultyModifier = Math.Clamp(input.WorldDifficultyOverride.Value, -20, 20);
+                isManualDifficulty = true;
+            }
+            else
+            {
+                difficultyModifier = 0;
+                var template = await _templateRep.GetByIdAsync(session.TemplateId);
+                if (template != null)
+                {
+                    difficultyModifier = template.DifficultyModifier;
+                }
+                isManualDifficulty = false;
             }
 
             if (DebugEnabled)
-                AiDebugLogger.LogOrchestration("技能判定", $"技能={classification.Judgment.Skill}, DC={classification.Judgment.Dc}, 优势={classification.Judgment.Advantage}, 劣势={classification.Judgment.Disadvantage}, 世界难度修正={difficultyModifier:+#;-#;0}");
+                AiDebugLogger.LogOrchestration("技能判定", $"技能={classification.Judgment.Skill}, DC={classification.Judgment.Dc}, 优势={classification.Judgment.Advantage}, 劣势={classification.Judgment.Disadvantage}, 世界难度修正={difficultyModifier:+#;-#;0}({(isManualDifficulty ? "手动" : "模板")})");
 
             diceResult = await _judgmentService.SkillCheckAsync(
                 sessionId,
@@ -293,7 +289,9 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             SideQuestList = BuildSideQuestList(session.SideQuests),
             HiddenContentList = BuildHiddenContentList(session.HiddenContent),
             // 玩家点选粗粒度推进选项时强制导演走章节档（一次性推演整段剧情并产出大篇幅叙事）
-            IsAdvanceAction = input.ActionScale == ActionScales.Advance
+            IsAdvanceAction = input.ActionScale == ActionScales.Advance,
+            // 成人轮：导演切换 director_adult_front_system 模板 + AdultDirector 模型，其余推演逻辑一致
+            IsAdult = isAdult
         };
 
         var directorOutput = await _director.DirectAsync(directorInput, sessionId);
@@ -364,7 +362,9 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             PlayerInventory = playerInventory,
             CharacterName = characterName,
             StyleBible = BuildStyleBibleText(session),
-            MotifTracker = BuildMotifTrackerText(session)
+            MotifTracker = BuildMotifTrackerText(session),
+            // 成人轮：叙事切换 narrative_adult_system 模板 + AdultNarrative 模型，同样据导演蓝图写正文
+            IsAdult = isAdult
         };
 
         if (DebugEnabled)
@@ -420,10 +420,14 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             HiddenContentList = directorInput.HiddenContentList,
             CharacterName = characterName,
             SuggestionsOnly = false,
+            // 成人轮：书记官切换 scribe_adult_system 模板 + AdultScribe 模型，与正常轮一样做完整状态记账
+            IsAdult = isAdult,
             // 选项节奏档位：抉择点/章节档/高紧张时为关键时刻（细粒度选项），否则输出粗粒度剧情推进型选项
             IsKeyMoment = directorOutput.PlayerChoicePoint
                 || directorOutput.BeatScale == "chapter"
-                || (directorOutput.Pacing?.TensionLevel ?? 0) >= 8
+                || (directorOutput.Pacing?.TensionLevel ?? 0) >= 8,
+            // 玩家当前目标（自由输入框提交）：让本轮书记官产出的下一批suggested_actions围绕该目标生成
+            PlayerGoal = session.CurrentPlayerGoal
         };
         result.ScribeTask = RunScribeTaskAsync(sessionId, result, scribeInput, applyRound, input.DryRun, npcs);
 
@@ -729,34 +733,6 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
     
     #region 私有辅助方法
 
-    private async Task<GameActionResult> HandleAdultAction(long sessionId, GameDungeonSession session, string actionText, List<GameNarrativeLog> narrativeHistory, string playerInventory, string characterName)
-    {
-        var worldState = await _worldState.GetCurrentStateAsync(sessionId);
-
-        var narrativeInput = new NarrativeInput
-        {
-            IsAdult = true,
-            PlayerAction = actionText,
-            RecentNarrative = BuildRecentNarrativeText(narrativeHistory),
-            WorldContext = BuildNarrativeWorldContext(session, worldState),
-            PlayerInventory = playerInventory,
-            SceneType = "adult",
-            CharacterName = characterName
-        };
-
-        // 更新会话计数器
-        session.InteractionCount++;
-        await _sessionRep.AsUpdateable(session)
-            .UpdateColumns(s => new { s.InteractionCount })
-            .ExecuteCommandAsync();
-
-        return new GameActionResult
-        {
-            NarrativeInput = narrativeInput,
-            IsChoicePoint = false
-        };
-    }
-
     /// <summary>
     /// 构建叙事AI的世界上下文摘要（精简文本，供叙事AI维持世界观一致性）
     /// </summary>
@@ -1040,16 +1016,16 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
     }
 
     /// <summary>
-    /// 序列化前台导演输出为书记官的既定事实文本（书记官只记录不改写）
+    /// 序列化GM输出为书记官的既定事实文本（书记官只记录不改写）
     /// </summary>
     private static string BuildDirectorFacts(DirectorOutput directorOutput)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"场景速写: {directorOutput.NarrativeSeed}");
+        sb.AppendLine($"剧情细纲: {directorOutput.NarrativeSeed}");
 
         if (directorOutput.Beats is { Count: > 0 })
         {
-            sb.AppendLine("章节分镜:");
+            sb.AppendLine("章节分段细纲:");
             foreach (var beat in directorOutput.Beats)
                 sb.AppendLine($"- [{beat.BeatType}] {beat.Seed}");
         }
@@ -1156,7 +1132,7 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
     /// 用于开场类场景（首次进入/重新开始/同题异卷重玩）与不可行短路补救：
     /// 以给定文本（开场叙事或拒绝叙事）作为[本轮既定事实]，复用 scribe_suggestions_system 提示词产出2个引导选项。
     /// </summary>
-    private async Task<ScribeInput> BuildSuggestionsOnlyInputAsync(long sessionId, string playerAction, string directorFacts, string characterName)
+    private async Task<ScribeInput> BuildSuggestionsOnlyInputAsync(long sessionId, string playerAction, string directorFacts, string characterName, bool isAdult = false)
     {
         var session = await _sessionRep.GetFirstAsync(s => s.Id == sessionId);
         var worldState = await _worldState.GetCurrentStateForDirectorAsync(sessionId);
@@ -1175,7 +1151,10 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             SideQuestList = "",
             HiddenContentList = "",
             CharacterName = characterName,
-            SuggestionsOnly = true
+            SuggestionsOnly = true,
+            IsAdult = isAdult,
+            // 开场/不可行短路补救场景同样尊重玩家已设置的目标（断线恢复/重开后目标仍生效）
+            PlayerGoal = session?.CurrentPlayerGoal
         };
     }
 
@@ -1184,11 +1163,11 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
     /// 为首次进入/重新开始/同题异卷重玩补齐行动选项（新手引导 + UX 一致性）。
     /// 失败时返回 null，调用方降级为无选项（不阻断副本启动）。
     /// </summary>
-    public async Task<List<SuggestedActionInfo>?> GenerateSuggestionsOnlyAsync(long sessionId, string playerAction, string directorFacts, string characterName)
+    public async Task<List<SuggestedActionInfo>?> GenerateSuggestionsOnlyAsync(long sessionId, string playerAction, string directorFacts, string characterName, bool isAdult = false)
     {
         try
         {
-            var scribeInput = await BuildSuggestionsOnlyInputAsync(sessionId, playerAction, directorFacts, characterName);
+            var scribeInput = await BuildSuggestionsOnlyInputAsync(sessionId, playerAction, directorFacts, characterName, isAdult);
             using var scope = _scopeFactory.CreateScope();
             var scribe = scope.ServiceProvider.GetRequiredService<ScribeAiService>();
             var output = await scribe.ScribeAsync(scribeInput, sessionId);
@@ -1382,10 +1361,16 @@ public class ProcessActionInput
     public long SessionId { get; set; }
     /// <summary>行动文本</summary>
     public string ActionText { get; set; } = "";
-    /// <summary>成人模式开关（前端玩家手动切换，开启后跳过分类AI和导演AI，直接走成人叙事）</summary>
+    /// <summary>成人模式开关（前端玩家手动切换；开启后全链路切换成人版提示词模板与模型，仍走完整分类→导演→叙事→书记官流程）</summary>
     public bool IsAdultMode { get; set; }
     /// <summary>干跑模式（预计算用，跳过所有DB写入但完整执行AI管线）</summary>
     public bool DryRun { get; set; }
+
+    /// <summary>
+    /// 手动世界难度覆盖值（前端“世界难度调整模式”开启时传入，范围 -20~+20；关闭时为 null）。
+    /// 非空时替换副本模板的 DifficultyModifier；为空时回退模板难度。
+    /// </summary>
+    public int? WorldDifficultyOverride { get; set; }
 
     /// <summary>
     /// 本次行动的粒度（来自被点选选项的 SuggestedActionInfo.Scale）：

@@ -269,7 +269,9 @@ public class GameSessionHub : Hub<IGameSessionHub>
                         IsCompleted = false
                     }).ToList() ?? new List<SideQuestInfoDto>()
                 },
-                GameState = gameState
+                GameState = gameState,
+                // 同步玩家当前目标（断线恢复时前端渲染目标chip与清空按钮；新建副本时为空）
+                CurrentPlayerGoal = session?.CurrentPlayerGoal ?? ""
             });
 
             // ★ 8. 恢复副本：推送离开前最后一轮的建议行动选项（方案A：续上离开前一刻）
@@ -331,7 +333,7 @@ public class GameSessionHub : Hub<IGameSessionHub>
                         }
 
                         // 启动预计算（玩家点选时秒响应；与常规轮 ledgerTask 内的预计算一致）
-                        var precomputeTask = _precomputeService.PrecomputeAsync(result.SessionId, optionsToCompute);
+                        var precomputeTask = _precomputeService.PrecomputeAsync(result.SessionId, optionsToCompute, null, false, input.IsVipMode);
                         var optionDtos = optionsToCompute.Select((sa, i) => new SuggestedActionOptionDto
                         {
                             Index = i,
@@ -415,6 +417,63 @@ public class GameSessionHub : Hub<IGameSessionHub>
     }
 
     /// <summary>
+    /// 设置玩家当前目标（自由输入框新语义：目标声明，非本轮行动）。
+    /// 仅写库 + 推送一条轻量反馈消息，不触发任何AI调用、不刷新当前选项、不失效预计算缓存。
+    /// 下一轮书记官构造ScribeInput时读取该字段，让下一批suggested_actions围绕目标生成。
+    /// </summary>
+    public async Task SetPlayerGoal(SetPlayerGoalInput input)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null) return;
+
+        // 服务端兼底：目标文本截断至200字（前端已限100字）
+        var goalText = (input.GoalText ?? string.Empty).Trim();
+        if (goalText.Length > 200)
+            goalText = goalText.Substring(0, 200);
+
+        try
+        {
+            var session = await _sessionRep.GetFirstAsync(s => s.Id == input.SessionId && s.UserId == userId.Value);
+            if (session == null)
+            {
+                await Clients.Caller.ReceiveSystemMessage(new SystemMessageDto
+                {
+                    Type = "error",
+                    Message = "会话不存在或无权访问",
+                    Timestamp = DateTime.Now
+                });
+                return;
+            }
+
+            session.CurrentPlayerGoal = goalText;
+            await _sessionRep.AsUpdateable(session)
+                .UpdateColumns(s => new { s.CurrentPlayerGoal })
+                .ExecuteCommandAsync();
+
+            // 轻量反馈：仅在目标非空时推送确认消息（空目标视为静默覆盖，不弹提示）
+            if (!string.IsNullOrEmpty(goalText))
+            {
+                await Clients.Caller.ReceiveSystemMessage(new SystemMessageDto
+                {
+                    Type = "info",
+                    Message = "已记下你的想法，接下来的选项会围绕它展开",
+                    Timestamp = DateTime.Now
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "设置玩家目标失败: SessionId={SessionId}", input.SessionId);
+            await Clients.Caller.ReceiveSystemMessage(new SystemMessageDto
+            {
+                Type = "error",
+                Message = "目标记录失败，请稍后重试",
+                Timestamp = DateTime.Now
+            });
+        }
+    }
+
+    /// <summary>
     /// 后台处理玩家行动，完成后通过SignalR推送结果给客户端
     /// </summary>
     private async Task ProcessPlayerActionAsync(long userId, string connectionId, PlayerActionInput input)
@@ -466,6 +525,8 @@ public class GameSessionHub : Hub<IGameSessionHub>
                 SessionId = input.SessionId,
                 ActionText = input.ActionText,
                 IsAdultMode = input.IsAdultMode,
+                // 手动世界难度覆盖值透传（开启时替换模板难度，关闭时为 null 回退模板）
+                WorldDifficultyOverride = input.WorldDifficultyOverride,
                 // 粒度透传：仅粗粒度选项回退路径会为 advance，玩家自由输入永远是 detail
                 ActionScale = input.ActionScale,
                 // 骰子掷出后立即推送结果给前端，让玩家在导演AI推演期间看到判定详情
@@ -588,13 +649,15 @@ public class GameSessionHub : Hub<IGameSessionHub>
                     }
 
                     // 记账完成后启动下一轮预计算（保证其分类AI读到本轮最新账本）
-                    if (result.SuggestedActions != null && result.SuggestedActions.Count >= 2 && !(result.NarrativeInput?.IsAdult ?? false))
+                    if (result.SuggestedActions != null && result.SuggestedActions.Count >= 2)
                     {
                         var optionsToCompute = result.SuggestedActions.Take(2).ToList();
+                        var isAdultRound = result.NarrativeInput?.IsAdult ?? false;
 
                         // 持久化选项文本到 session.LastSuggestedActions：
-                        // 副本挂起/断线恢复时前端可继续显示按钮；缓存命中走秒响应，未命中以文本走常规全链路
-                        if (session != null)
+                        // 副本挂起/断线恢复时前端可继续显示按钮；缓存命中走秒响应，未命中以文本走常规全链路。
+                        // 成人轮跳过持久化，避免断线恢复时显示成人选项文本（保留原门控语义）。
+                        if (session != null && !isAdultRound)
                         {
                             try
                             {
@@ -609,7 +672,8 @@ public class GameSessionHub : Hub<IGameSessionHub>
                             }
                         }
 
-                        return (Task?)Task.Run(() => _precomputeService.PrecomputeAsync(input.SessionId, optionsToCompute));
+                        // 预计算继承本轮会话级成人模式：成人轮也用成人模型预掷，从下一次预计算起全链路切换（对齐世界难度override语义）
+                        return (Task?)Task.Run(() => _precomputeService.PrecomputeAsync(input.SessionId, optionsToCompute, input.WorldDifficultyOverride, input.IsAdultMode, input.IsVipMode));
                     }
                 }
                 catch (Exception ex)
@@ -665,17 +729,6 @@ public class GameSessionHub : Hub<IGameSessionHub>
                     Narrative = GetTimeTransitionNarrative(session.CurrentSegment),
                     NewSegment = GetSegmentName(session.CurrentSegment),
                     NewDay = session.CurrentDay
-                });
-            }
-
-            // 6. 若是选择点 → 推送
-            if (result.IsChoicePoint)
-            {
-                await hubContext.Clients.Client(connectionId).RequestPlayerChoice(new PlayerChoiceDto
-                {
-                    Prompt = "你面临一个关键抉择",
-                    Choices = new List<string>(),
-                    IsRequired = true
                 });
             }
 
@@ -1023,6 +1076,8 @@ public class GameSessionHub : Hub<IGameSessionHub>
                     SessionId = input.SessionId,
                     ActionText = fallbackText,
                     IsAdultMode = input.IsAdultMode,
+                    // 手动世界难度覆盖值不能丢：回退常规全链路时仍需带上玩家设定的难度修正
+                    WorldDifficultyOverride = input.WorldDifficultyOverride,
                     // 粒度不能丢：粗粒度推进选项回退常规流程时仍需让导演走章节档。
                     // 缓存尚在时直取；缓存已丢（如服务重启）则从已持久化的 LastSuggestedActions 按索引反查。
                     ActionScale = cached?.Scale
@@ -1130,13 +1185,15 @@ public class GameSessionHub : Hub<IGameSessionHub>
                     }
 
                     // 记账完成后启动下一轮预计算（保证其分类AI读到本轮最新账本）
-                    if (result.SuggestedActions != null && result.SuggestedActions.Count >= 2 && !(result.NarrativeInput?.IsAdult ?? false))
+                    if (result.SuggestedActions != null && result.SuggestedActions.Count >= 2)
                     {
                         var nextOptions = result.SuggestedActions!.Take(2).ToList();
+                        var isAdultRound = result.NarrativeInput?.IsAdult ?? false;
 
                         // 持久化选项文本到 session.LastSuggestedActions（与 PlayerAction 路径一致）：
-                        // 副本挂起/断线恢复时前端可继续显示按钮；缓存命中走秒响应，未命中以文本走常规全链路
-                        if (sessionL != null)
+                        // 副本挂起/断线恢复时前端可继续显示按钮；缓存命中走秒响应，未命中以文本走常规全链路。
+                        // 成人轮跳过持久化，避免断线恢复时显示成人选项文本（保留原门控语义）。
+                        if (sessionL != null && !isAdultRound)
                         {
                             try
                             {
@@ -1151,7 +1208,8 @@ public class GameSessionHub : Hub<IGameSessionHub>
                             }
                         }
 
-                        return (Task?)Task.Run(() => _precomputeService.PrecomputeAsync(input.SessionId, nextOptions));
+                        // 预计算继承本轮会话级成人模式：成人轮也用成人模型预掷，从下一次预计算起全链路切换（对齐世界难度override语义）
+                        return (Task?)Task.Run(() => _precomputeService.PrecomputeAsync(input.SessionId, nextOptions, input.WorldDifficultyOverride, input.IsAdultMode, input.IsVipMode));
                     }
                 }
                 catch (Exception ex)
@@ -1164,9 +1222,16 @@ public class GameSessionHub : Hub<IGameSessionHub>
             // 4. 【L1改造】叙事实时流式生成（原为回放预生成文本），与后台链并行。
             //    章节档与非章节档统一走 StreamNarrativeLiveAsync（内部对章节档走分镜流式续写）。
             //    不可行短路（NarrativeInput=null）时回放拒绝文案，避免界面静默。
+            //    【VIP模式】若预计算已预生成叙事文本（cached.NarrativeText 非空）→ 直接文本回放，首字延迟≈0；
+            //    未预生成（非VIP、或VIP预生成未就绪/失败）→ 自动降级为实时流式，保证不卡住。
             var chunkType = result.DiceResult != null ? "action_result" : "narrative";
             string narrativeText;
-            if (result.NarrativeInput != null)
+            if (!string.IsNullOrEmpty(cached.NarrativeText))
+            {
+                narrativeText = cached.NarrativeText;
+                await broadcast.StreamNarrativeAsync(userId, narrativeText, chunkType);
+            }
+            else if (result.NarrativeInput != null)
             {
                 narrativeText = await broadcast.StreamNarrativeLiveAsync(
                     userId, narrativeAi, result.NarrativeInput, input.SessionId, chunkType);
@@ -1205,9 +1270,9 @@ public class GameSessionHub : Hub<IGameSessionHub>
                 }).ExecuteCommandAsync();
             }
 
-            // 构建下一轮选项DTO（此时 SuggestedActions 已由后台链 await 书记官回填）
+            // 构建下一轮选项DTO（此时 SuggestedActions 已由后台链 await 书记官回填；成人轮同样产出选项）
             List<SuggestedActionOptionDto>? nextOptionDtos = null;
-            if (result.SuggestedActions != null && result.SuggestedActions.Count >= 2 && !(result.NarrativeInput?.IsAdult ?? false))
+            if (result.SuggestedActions is { Count: >= 2 })
             {
                 nextOptionDtos = result.SuggestedActions!.Take(2).Select((sa, i) => new SuggestedActionOptionDto
                 {
@@ -1222,17 +1287,6 @@ public class GameSessionHub : Hub<IGameSessionHub>
             {
                 await hubContext.Clients.Client(connectionId).UpdateGameState(
                     BuildGameState(characterForState, session.CurrentDay, session.CurrentSegment, session.TensionLevel));
-            }
-
-            // 5.5 若是选择点 → 推送
-            if (result.IsChoicePoint)
-            {
-                await hubContext.Clients.Client(connectionId).RequestPlayerChoice(new PlayerChoiceDto
-                {
-                    Prompt = "你面临一个关键抉择",
-                    Choices = new List<string>(),
-                    IsRequired = true
-                });
             }
 
             // 7. 推送时段变化（如有）
@@ -1641,13 +1695,13 @@ public class GameSessionHub : Hub<IGameSessionHub>
         });
 
         // 2. fire-and-forget
-        _ = ProcessRestartSessionAsync(userId.Value, connectionId, input.SessionId);
+        _ = ProcessRestartSessionAsync(userId.Value, connectionId, input.SessionId, input.IsVipMode);
     }
 
     /// <summary>
     /// 后台处理重新开始：清除历史数据，重置状态，重新生成开场叙事
     /// </summary>
-    private async Task ProcessRestartSessionAsync(long userId, string connectionId, long sessionId)
+    private async Task ProcessRestartSessionAsync(long userId, string connectionId, long sessionId, bool isVip = false)
     {
         using var scope = _scopeFactory.CreateScope();
         var sp = scope.ServiceProvider;
@@ -1943,7 +1997,9 @@ public class GameSessionHub : Hub<IGameSessionHub>
                     KeyLocations = keyLocations,
                     SideQuests = sideQuests
                 },
-                GameState = gameState
+                GameState = gameState,
+                // 重新开始时目标依然保留（玩家可能想继续之前的意图）
+                CurrentPlayerGoal = session?.CurrentPlayerGoal ?? ""
             });
 
             // ★ 重新开始：生成开场行动选项（方案C-1，复用书记官轻量模式，与首次进入一致）
@@ -1963,7 +2019,7 @@ public class GameSessionHub : Hub<IGameSessionHub>
                         .ExecuteCommandAsync();
 
                     // 启动预计算（玩家点选时秒响应）
-                    var precomputeTask = _precomputeService.PrecomputeAsync(sessionId, optionsToCompute);
+                    var precomputeTask = _precomputeService.PrecomputeAsync(sessionId, optionsToCompute, null, false, isVip);
                     var optionDtos = optionsToCompute.Select((sa, i) => new SuggestedActionOptionDto
                     {
                         Index = i,

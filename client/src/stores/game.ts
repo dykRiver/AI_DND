@@ -5,7 +5,6 @@ import type {
   NarrativeChunk,
   DiceResult,
   TimeTransition,
-  PlayerChoice,
   DangerousActionConfirm,
   SystemMessage,
   WorldInfo,
@@ -24,6 +23,8 @@ interface PersistedState {
   sessionId: string
   worldInfo: WorldInfo | null
   gameState: GameState
+  /// 玩家当前目标（自由输入框提交的中长期意图，跨页面刷新保留）
+  currentGoal: string
 }
 
 function loadPersistedState(): PersistedState | null {
@@ -82,10 +83,6 @@ export const useGameStore = defineStore('game', () => {
   const latestTimeTransition = ref<TimeTransition | null>(null)
   const showTimeTransition = ref(false)
 
-  // 选择
-  const currentChoice = ref<PlayerChoice | null>(null)
-  const showChoice = ref(false)
-
   // 危险动作确认
   const dangerousAction = ref<DangerousActionConfirm | null>(null)
   const showDangerConfirm = ref(false)
@@ -114,6 +111,18 @@ export const useGameStore = defineStore('game', () => {
   // ★ 成人模式开关
   const isAdultMode = ref(false)
 
+  // ★ VIP模式开关（开启后预计算阶段预生成叙事文本，点选选项时剧情秒出；代价是叙事token约翻倍）
+  const isVipMode = ref(false)
+
+  // ★ 世界难度调整模式（玩家手动输入难度修正值，仅本次运行、不持久化，刷新即归零）
+  const worldDifficultyMode = ref(false)
+  const worldDifficultyValue = ref(0)
+
+  // 传给后端的可空覆盖值：模式开启=玩家数值（-20~+20），关闭=null（后端回退副本模板难度）
+  const worldDifficultyOverride = computed<number | null>(() =>
+    worldDifficultyMode.value ? worldDifficultyValue.value : null
+  )
+
   // ★ 结算数据
   const settlementData = ref<SessionEndData | null>(null)
   const showSettlement = ref(false)
@@ -121,8 +130,28 @@ export const useGameStore = defineStore('game', () => {
   // ★ 建议行动选项（预计算快速选择）
   const suggestedActions = ref<SuggestedActionsData | null>(null)
 
+  // ★ 玩家当前目标（自由输入框新语义：中长期意图声明，非本轮行动）
+  //   与服务端 GameDungeonSession.CurrentPlayerGoal 双向同步：
+  //   - 前端提交时写入 + 推送 SetPlayerGoal
+  //   - DungeonReady 时从服务端回填（跨设备/刷新一致性）
+  const currentGoal = ref<string>(persisted?.currentGoal ?? '')
+
   function toggleAdultMode() {
     isAdultMode.value = !isAdultMode.value
+  }
+
+  function toggleVipMode() {
+    isVipMode.value = !isVipMode.value
+  }
+
+  function toggleWorldDifficultyMode() {
+    worldDifficultyMode.value = !worldDifficultyMode.value
+  }
+
+  // 设置手动世界难度修正值，限制在 -20 ~ +20
+  function setWorldDifficultyValue(v: number) {
+    const n = Number.isFinite(v) ? Math.round(v) : 0
+    worldDifficultyValue.value = Math.max(-20, Math.min(20, n))
   }
 
   // ========== 持久化辅助 ==========
@@ -131,6 +160,7 @@ export const useGameStore = defineStore('game', () => {
       sessionId: sessionId.value,
       worldInfo: worldInfo.value,
       gameState: gameState.value,
+      currentGoal: currentGoal.value,
     })
   }
 
@@ -181,16 +211,6 @@ export const useGameStore = defineStore('game', () => {
     setTimeout(() => {
       showTimeTransition.value = false
     }, 4000)
-  }
-
-  function setChoice(choice: PlayerChoice) {
-    currentChoice.value = choice
-    showChoice.value = true
-  }
-
-  function clearChoice() {
-    currentChoice.value = null
-    showChoice.value = false
   }
 
   function setDangerousAction(action: DangerousActionConfirm) {
@@ -286,12 +306,23 @@ export const useGameStore = defineStore('game', () => {
     suggestedActions.value = null
   }
 
+  /// 设置玩家当前目标（自由输入框提交后调用，与服务端 SetPlayerGoal 同步）
+  function setCurrentGoal(text: string) {
+    currentGoal.value = text
+    persist()
+  }
+
+  /// 清空玩家当前目标（点击清空按钮后调用，与服务端 SetPlayerGoal('') 同步）
+  function clearCurrentGoal() {
+    currentGoal.value = ''
+    persist()
+  }
+
   function clearSession() {
     sessionId.value = ''
     narrativeChunks.value = []
     latestDiceResult.value = null
     latestTimeTransition.value = null
-    currentChoice.value = null
     dangerousAction.value = null
     systemMessages.value = []
     worldInfo.value = null
@@ -300,6 +331,7 @@ export const useGameStore = defineStore('game', () => {
     isInputDisabled.value = false
     suggestedActions.value = null
     knownAssets.value = []
+    currentGoal.value = ''
     clearPersistedState()
   }
 
@@ -310,8 +342,6 @@ export const useGameStore = defineStore('game', () => {
     showDice.value = false
     latestTimeTransition.value = null
     showTimeTransition.value = false
-    currentChoice.value = null
-    showChoice.value = false
     dangerousAction.value = null
     showDangerConfirm.value = false
     systemMessages.value = []
@@ -327,10 +357,13 @@ export const useGameStore = defineStore('game', () => {
     sessionId: string
     worldInfo: WorldInfo
     gameState: GameState
+    currentPlayerGoal?: string
   }) {
     sessionId.value = data.sessionId
     worldInfo.value = data.worldInfo
     gameState.value = data.gameState
+    // 目标以服务端为权威（跨设备/刷新后仍保留玩家之前设置的意图）
+    currentGoal.value = data.currentPlayerGoal ?? ''
     showWorldInfo.value = true
     isInputDisabled.value = false
     isLoading.value = false
@@ -347,8 +380,6 @@ export const useGameStore = defineStore('game', () => {
     showDice,
     latestTimeTransition,
     showTimeTransition,
-    currentChoice,
-    showChoice,
     dangerousAction,
     showDangerConfirm,
     systemMessages,
@@ -361,16 +392,21 @@ export const useGameStore = defineStore('game', () => {
     showBackpack,
     knownAssets,
     isAdultMode,
+    isVipMode,
+    worldDifficultyMode,
+    worldDifficultyValue,
+    worldDifficultyOverride,
     settlementData,
     showSettlement,
     toggleAdultMode,
+    toggleVipMode,
+    toggleWorldDifficultyMode,
+    setWorldDifficultyValue,
     setSession,
     appendNarrative,
     updateGameState,
     setDiceResult,
     setTimeTransition,
-    setChoice,
-    clearChoice,
     setDangerousAction,
     clearDangerousAction,
     addSystemMessage,
@@ -387,6 +423,9 @@ export const useGameStore = defineStore('game', () => {
     suggestedActions,
     setSuggestedActions,
     clearSuggestedActions,
+    currentGoal,
+    setCurrentGoal,
+    clearCurrentGoal,
     clearSession,
     clearNarrativeHistory,
     restoreFromServer,

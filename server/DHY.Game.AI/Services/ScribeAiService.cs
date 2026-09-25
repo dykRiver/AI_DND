@@ -58,14 +58,23 @@ public class ScribeAiService : ITransient
     private async Task<ScribeOutput?> ScribeOnceAsync(ScribeInput input, long? sessionId)
     {
         var sw = Stopwatch.StartNew();
-        var config = _modelFactory.GetModelConfig("Scribe");
+        var aiRole = input.IsAdult ? "AdultScribe" : "Scribe";
+        var config = _modelFactory.GetModelConfig(aiRole);
 
         if (_modelFactory.IsDebugEnabled)
-            AiDebugLogger.LogCallChain("Scribe", $"开始书记官记账, 玩家行动: {input.PlayerAction}");
+            AiDebugLogger.LogCallChain(aiRole, $"开始书记官记账, 玩家行动: {input.PlayerAction}");
 
         try
         {
-            var systemPrompt = _promptService.LoadTemplate(input.SuggestionsOnly ? "scribe_suggestions_system" : "scribe_system");
+            // 成人轮切换为成人版模板（完整记账 scribe_adult_system / 仅选项 scribe_adult_suggestions_system），与正常轮同构
+            var templateName = input.IsAdult
+                ? (input.SuggestionsOnly ? "scribe_adult_suggestions_system" : "scribe_adult_system")
+                : (input.SuggestionsOnly ? "scribe_suggestions_system" : "scribe_system");
+            var systemPrompt = _promptService.LoadTemplate(templateName);
+            // 档位已由代码层判定（IsKeyMoment），仅注入适用档位的规则块，裁掉另一档减少无关指令与Token
+            systemPrompt = _promptService.SelectPacingTier(systemPrompt, input.IsKeyMoment);
+            // 有无玩家目标由代码判定：仅注入适用的目标/引导线索规则分支，裁掉另一分支减少无关指令与Token
+            systemPrompt = _promptService.SelectGoalMode(systemPrompt, !string.IsNullOrWhiteSpace(input.PlayerGoal));
 
             // 构造上下文消息列表（按注意力权重排列，既定事实与玩家行动放最后）
             var messages = new List<ChatMessage>
@@ -121,9 +130,20 @@ public class ScribeAiService : ITransient
                 messages.Add(new ChatMessage { Role = "assistant", Content = "已了解判定结果。" });
             }
 
-            // 前台导演输出的既定事实（书记官只记录，不得改写剧情）
-            messages.Add(new ChatMessage { Role = "user", Content = $"[本轮既定事实(前台导演输出)]\n{input.DirectorFacts}" });
+            // GM输出的既定事实（书记官只记录，不得改写剧情）
+            messages.Add(new ChatMessage { Role = "user", Content = $"[本轮既定事实(GM输出)]\n{input.DirectorFacts}" });
             messages.Add(new ChatMessage { Role = "assistant", Content = "已了解本轮既定事实，我将据此如实记账。" });
+
+            // 玩家当前目标（自由输入框提交的中长期意图，非本轮行动）：非空时注入，让书记官生成suggested_actions时兼顾玩家意图
+            if (!string.IsNullOrWhiteSpace(input.PlayerGoal))
+            {
+                messages.Add(new ChatMessage
+                {
+                    Role = "user",
+                    Content = $"[玩家当前目标]\n{input.PlayerGoal}\n（玩家表达的中长期意图，非本轮行动。生成suggested_actions时须让选项服务于该目标，但不得脱离本轮既定事实与世界状态；若目标与当前情境冲突，优先输出化解冲突的选项。）"
+                });
+                messages.Add(new ChatMessage { Role = "assistant", Content = "已了解玩家目标，我将在生成建议选项时兼顾剧情与玩家意图。" });
+            }
 
             // 选项节奏档位（由代码层依导演输出判定：抉择点/章节档/高紧张为关键时刻）
             var pacingTier = input.IsKeyMoment ? "细粒度档（关键时刻）" : "粗粒度档（推进优先）";
@@ -140,10 +160,10 @@ public class ScribeAiService : ITransient
             });
 
             var client = _modelFactory.CreateClient(config);
-            var result = await client.ChatCompletionAsync(messages, config, aiRole: "Scribe");
+            var result = await client.ChatCompletionAsync(messages, config, aiRole: aiRole);
 
             sw.Stop();
-            await LogAiCallAsync(sessionId, config.ModelId, result, sw.ElapsedMilliseconds);
+            await LogAiCallAsync(sessionId, config.ModelId, result, sw.ElapsedMilliseconds, input.IsAdult);
 
             if (!result.IsSuccess)
             {
@@ -155,8 +175,8 @@ public class ScribeAiService : ITransient
 
             if (_modelFactory.IsDebugEnabled && output != null)
             {
-                AiDebugLogger.LogCallChain("Scribe", $"状态摘要: {output.WorldStateChanges?.Summary}");
-                AiDebugLogger.LogCallChain("Scribe", $"物资hint数: {output.ItemHints?.Count ?? 0}, 态度变化数: {output.NpcAttitudeChanges?.Count ?? 0}, 建议选项数: {output.SuggestedActions?.Count ?? 0}");
+                AiDebugLogger.LogCallChain(aiRole, $"状态摘要: {output.WorldStateChanges?.Summary}");
+                AiDebugLogger.LogCallChain(aiRole, $"物资hint数: {output.ItemHints?.Count ?? 0}, 态度变化数: {output.NpcAttitudeChanges?.Count ?? 0}, 建议选项数: {output.SuggestedActions?.Count ?? 0}");
             }
 
             return output;
@@ -167,7 +187,7 @@ public class ScribeAiService : ITransient
             _logger.LogError(ex, "书记官AI服务异常");
             await LogAiCallAsync(sessionId, config.ModelId,
                 new AiCompletionResult { IsSuccess = false, ErrorMessage = ex.Message },
-                sw.ElapsedMilliseconds);
+                sw.ElapsedMilliseconds, input.IsAdult);
             return null;
         }
     }
@@ -186,14 +206,14 @@ public class ScribeAiService : ITransient
         }
     }
 
-    private async Task LogAiCallAsync(long? sessionId, string modelName, AiCompletionResult result, long durationMs)
+    private async Task LogAiCallAsync(long? sessionId, string modelName, AiCompletionResult result, long durationMs, bool isAdult = false)
     {
         try
         {
             var log = new GameAiCallLog
             {
                 SessionId = sessionId,
-                AiType = "scribe",
+                AiType = isAdult ? "adult_scribe" : "scribe",
                 ModelName = modelName,
                 InputTokens = result.InputTokens,
                 OutputTokens = result.OutputTokens,

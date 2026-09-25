@@ -157,6 +157,24 @@ public class DungeonArchitectService : ITransient
         if (!string.IsNullOrEmpty(template.BasePrompt))
             sb.AppendLine($"补充设定:\n{template.BasePrompt}");
 
+        // 文风引导（可选）：若模板预设了文风字段，作为 style_bible / motifs 的生成基准注入
+        var hasStyleGuide = !string.IsNullOrWhiteSpace(template.Tone)
+            || template.SensorySeeds is { Count: > 0 }
+            || template.ForbiddenCliches is { Count: > 0 }
+            || template.MotifSeeds is { Count: > 0 };
+        if (hasStyleGuide)
+        {
+            sb.AppendLine("文风引导（作为 style_bible / motifs 的生成基准，须在其基础上扩展完善，仍遵守大白话、禁电影/文学流派等规则）:");
+            if (!string.IsNullOrWhiteSpace(template.Tone))
+                sb.AppendLine($"- 语调基调: {template.Tone}");
+            if (template.SensorySeeds is { Count: > 0 })
+                sb.AppendLine($"- 感官印象种子: {string.Join(", ", template.SensorySeeds)}");
+            if (template.ForbiddenCliches is { Count: > 0 })
+                sb.AppendLine($"- 禁用陈词: {string.Join(", ", template.ForbiddenCliches)}");
+            if (template.MotifSeeds is { Count: > 0 })
+                sb.AppendLine($"- 意象种子: {string.Join(", ", template.MotifSeeds)}");
+        }
+
         return sb.ToString();
     }
 

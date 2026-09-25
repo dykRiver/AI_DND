@@ -59,4 +59,28 @@ public class GameDungeonTemplate : EntityBase
     /// </summary>
     [SugarColumn(ColumnDescription = "世界难度修正值", DefaultValue = "0")]
     public int DifficultyModifier { get; set; }
+
+    /// <summary>
+    /// 文风引导-语调基调（可选，作为架构师生成 style_bible.tone 的基准）
+    /// </summary>
+    [SugarColumn(ColumnDescription = "文风引导-语调基调", Length = 512, IsNullable = true)]
+    public string? Tone { get; set; }
+
+    /// <summary>
+    /// 文风引导-感官印象种子（可选，作为 style_bible.sensory_palette 的基准）
+    /// </summary>
+    [SugarColumn(ColumnDescription = "文风引导-感官印象种子", ColumnDataType = "nvarchar(max)", IsJson = true, IsNullable = true)]
+    public List<string>? SensorySeeds { get; set; }
+
+    /// <summary>
+    /// 文风引导-禁用陈词（可选，作为 style_bible.forbidden_cliches 的基准）
+    /// </summary>
+    [SugarColumn(ColumnDescription = "文风引导-禁用陈词", ColumnDataType = "nvarchar(max)", IsJson = true, IsNullable = true)]
+    public List<string>? ForbiddenCliches { get; set; }
+
+    /// <summary>
+    /// 文风引导-意象种子（可选，作为 motifs 生成的基准）
+    /// </summary>
+    [SugarColumn(ColumnDescription = "文风引导-意象种子", ColumnDataType = "nvarchar(max)", IsJson = true, IsNullable = true)]
+    public List<string>? MotifSeeds { get; set; }
 }

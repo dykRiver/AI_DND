@@ -50,4 +50,10 @@ public class DirectorInput
     /// 一次性推演完整弧线而非只推演第一步。
     /// </summary>
     public bool IsAdvanceAction { get; set; }
+
+    /// <summary>
+    /// 是否为成人内容轮（成人模式开启或分类判定为成人）。
+    /// true 时切换为 director_adult_front_system 提示词模板与 AdultDirector 模型配置，其余链路与正常轮一致。
+    /// </summary>
+    public bool IsAdult { get; set; }
 }

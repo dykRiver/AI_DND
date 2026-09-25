@@ -217,6 +217,26 @@ public class CreateTemplateInput
     /// 世界难度修正值（E=-3/D=-2/C=0/B=+2/A=+3）
     /// </summary>
     public int DifficultyModifier { get; set; }
+
+    /// <summary>
+    /// 文风引导-语调基调（可选）
+    /// </summary>
+    public string? Tone { get; set; }
+
+    /// <summary>
+    /// 文风引导-感官印象种子（可选）
+    /// </summary>
+    public List<string>? SensorySeeds { get; set; }
+
+    /// <summary>
+    /// 文风引导-禁用陈词（可选）
+    /// </summary>
+    public List<string>? ForbiddenCliches { get; set; }
+
+    /// <summary>
+    /// 文风引导-意象种子（可选）
+    /// </summary>
+    public List<string>? MotifSeeds { get; set; }
 }
 
 /// <summary>
