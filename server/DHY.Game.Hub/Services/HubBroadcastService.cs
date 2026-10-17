@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using DHY.Game.AI.Dtos;
+using DHY.Game.AI.Models;
 using DHY.Game.AI.Services;
 using DHY.Game.Hub.Dtos;
 using DHY.Game.Hub.Hubs;
@@ -147,43 +148,28 @@ public class HubBroadcastService : ITransient
     }
 
     /// <summary>
-    /// 章节档命中缓存的混合推送：先回放已预取的前缀正文（保留段落），再从 resumeBeatIndex 起实时流式续写剩余分镜。
-    /// 玩家点选后秒见首段（前缀），其余分镜在阅读期间边读边生成，掩盖生成延迟。
+    /// 【路径B】从可重放 buffer 接管叙事流并推送给客户端：已缓冲 chunk 立即回放（首字≈0），
+    /// 追平后续读同一生产流的后续 chunk，直到生产完成。生产中途失败时（buffer.IsFaulted）已缓冲内容照常推完，
+    /// 随后补发 IsLast 正常收尾（D2），不向玩家报错。全程复用预生成那一次 AI 请求，不新开。
     /// </summary>
-    /// <returns>完整叙事文本（前缀 + 续写，用于后续日志记录）</returns>
-    public async Task<string> StreamChapterResumeAsync(
+    /// <returns>完整叙事文本（用于后续日志记录）</returns>
+    public async Task<string> StreamNarrativeFromBufferAsync(
         long userId,
-        NarrativeAiService narrativeAi,
-        NarrativeInput narrativeInput,
-        string prefixText,
-        int resumeBeatIndex,
-        string chunkType = "narrative")
+        NarrativeStreamBuffer buffer,
+        string chunkType = "narrative",
+        CancellationToken ct = default)
     {
         var connectionId = _sessionManager.GetConnectionId(userId);
-        if (connectionId == null) return prefixText;
+        if (connectionId == null) return buffer.FullText;
 
         var client = _hubContext.Clients.Client(connectionId);
         var fullText = new System.Text.StringBuilder();
+        var sw = Stopwatch.StartNew();
+        var isFirst = true;
 
         try
         {
-            // 1. 回放已预取的前缀（按句分块、保留段落，模拟流式）
-            foreach (var chunk in SplitNarrativeToChunks(prefixText))
-            {
-                fullText.Append(chunk);
-                await client.ReceiveNarrative(new NarrativeChunkDto
-                {
-                    Text = chunk,
-                    ChunkType = chunkType,
-                    IsLast = false,
-                    Timestamp = DateTime.Now
-                });
-                if (_options.StreamChunkDelayMs > 0)
-                    await Task.Delay(_options.StreamChunkDelayMs);
-            }
-
-            // 2. 从 resumeBeatIndex 起实时续写（首个 chunk 为分隔空行，与前缀无缝衔接）
-            await foreach (var chunk in narrativeAi.StreamChapterContinuationAsync(narrativeInput, resumeBeatIndex, prefixText))
+            await foreach (var chunk in buffer.ReplayAsync(ct))
             {
                 if (string.IsNullOrEmpty(chunk))
                     continue;
@@ -196,9 +182,14 @@ public class HubBroadcastService : ITransient
                     IsLast = false,
                     Timestamp = DateTime.Now
                 });
+
+                if (isFirst)
+                {
+                    isFirst = false;
+                    _logger.LogInformation("叙事接管首chunk延迟: 延迟ms={Delay}", sw.ElapsedMilliseconds);
+                }
             }
 
-            // 3. 发送最后一块标记
             await client.ReceiveNarrative(new NarrativeChunkDto
             {
                 Text = "",
@@ -206,10 +197,13 @@ public class HubBroadcastService : ITransient
                 IsLast = true,
                 Timestamp = DateTime.Now
             });
+
+            sw.Stop();
+            _logger.LogDebug("叙事接管流式完成: {Length}字, 耗时{Elapsed}ms", fullText.Length, sw.ElapsedMilliseconds);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "章节档续写流式推送异常");
+            _logger.LogError(ex, "叙事接管流式推送异常");
             try
             {
                 await client.ReceiveNarrative(new NarrativeChunkDto

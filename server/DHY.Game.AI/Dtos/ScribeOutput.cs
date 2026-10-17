@@ -102,4 +102,12 @@ public class ScribeInput
     /// 两个选项应共同服务于该目标，但不得脱离本轮既定事实与世界状态）。
     /// </summary>
     public string? PlayerGoal { get; set; }
+
+    /// <summary>
+    /// 辅导员策略指引（玩家辅导员对 PlayerGoal 的消歧意图 + 当前子目标 + 进度 + next_focus 拼装文本）。
+    /// 非空时 ScribeAiService 注入 [辅导员策略指引] 消息对替代 [玩家当前目标] 原文，
+    /// 让 suggested_actions 至少一个选项服务 next_focus 主方向；
+    /// 为空（辅导员超时/失败，或预计算无已落库 CoachState）时回退注入原始 PlayerGoal（现状行为，零回归）。
+    /// </summary>
+    public string? CoachFocus { get; set; }
 }

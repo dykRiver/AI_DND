@@ -170,12 +170,34 @@ export interface DungeonReady {
   gameState: GameState
   /// 玩家当前目标（断线恢复/重新开始时由服务端同步，用于渲染目标chip与清空按钮）
   currentPlayerGoal?: string
+  /// 辅导员状态（断线恢复/重新开始时同步，渲染目标 chip 展开区进度）
+  coachState?: CoachState | null
 }
 
 // ========== 系统消息 ==========
 export interface SystemMessage {
   type: 'info' | 'warning' | 'error' | 'success'
   content: string
+}
+
+// ========== 辅导员状态（玩家目标 chip 进度展示） ==========
+export interface CoachState {
+  /// 消歧后的清晰目标（辅导员理解的玩家意图，比原始目标更具体）
+  clarifiedIntent?: string
+  /// 当前滚动子目标（眼下最该推进的一件事）
+  currentSubgoal?: string
+  /// 进度评估说明
+  progressNote?: string
+  /// 目标状态：active/complete/failed
+  goalStatus: string
+}
+
+// ========== 玩家目标更新推送（每轮辅导员进度 / 达成失效清空） ==========
+export interface PlayerGoalUpdate {
+  /// 玩家原始目标文本（达成/失效/清空时为空）
+  currentPlayerGoal: string
+  /// 辅导员状态（无目标或已终结时为 null，前端收起 chip 展开区）
+  coachState?: CoachState | null
 }
 
 // ========== 天赋树 ==========
@@ -216,6 +238,8 @@ export interface ActiveSessionResult {
   suggestedActions?: SuggestedAction[]
   /// 玩家当前目标（断线续玩时同步，用于渲染目标chip与清空按钮）
   currentPlayerGoal?: string
+  /// 辅导员状态（断线续玩时同步，渲染目标 chip 展开区进度）
+  coachState?: CoachState | null
 }
 
 export interface ActiveSessionNarrative {

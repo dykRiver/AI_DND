@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import type { CoachState } from '@/types/game'
 
 const emit = defineEmits<{
   send: [text: string]
@@ -10,6 +11,8 @@ const props = defineProps<{
   disabled: boolean
   /// 当前目标文本（由父组件从 gameStore.currentGoal 传入）；非空时渲染目标chip+清空按钮
   currentGoal?: string
+  /// 辅导员状态（由父组件从 gameStore.coachState 传入）；非空时 chip 展示消歧目标 + 可展开子目标/进度
+  coachState?: CoachState | null
 }>()
 
 // 自由输入框新语义：提交中长期目标声明（非本轮行动），前端限100字
@@ -17,6 +20,12 @@ const MAX_LEN = 100
 const inputText = ref('')
 const remaining = computed(() => MAX_LEN - inputText.value.length)
 const hasGoal = computed(() => !!(props.currentGoal && props.currentGoal.trim()))
+// chip 主显示：优先辅导员消歧后的清晰目标（更具体），无则回退玩家原始目标文本
+const displayGoal = computed(() => props.coachState?.clarifiedIntent?.trim() || props.currentGoal || '')
+// 是否有可展开的辅导员进度详情（子目标或进度说明）
+const hasCoachDetail = computed(() => !!(props.coachState?.currentSubgoal?.trim() || props.coachState?.progressNote?.trim()))
+// chip 进度展开区开关
+const expanded = ref(false)
 
 function handleInput(e: Event) {
   const target = e.target as HTMLTextAreaElement
@@ -46,27 +55,53 @@ function handleKeydown(e: KeyboardEvent) {
 
 <template>
   <div class="border-t border-gray-700/50 bg-slate-900/95 backdrop-blur px-4 py-3 safe-bottom">
-    <!-- 目标chip：当前有目标时显示，点击×清空 -->
+    <!-- 目标chip：当前有目标时显示，展示辅导员消歧目标，可展开子目标/进度，点击×清空 -->
     <div
       v-if="hasGoal"
-      class="mb-2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/30 max-w-full"
+      class="mb-2 rounded-lg bg-indigo-500/10 border border-indigo-500/30 max-w-full"
     >
-      <span class="text-indigo-400 text-xs flex-shrink-0">🎯 当前目标</span>
-      <span
-        class="text-indigo-200/90 text-xs truncate flex-1 min-w-0"
-        :title="currentGoal"
-      >{{ currentGoal }}</span>
-      <button
-        @click="handleClearGoal"
-        :disabled="disabled"
-        class="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full text-indigo-300/70 hover:text-rose-300 hover:bg-rose-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        title="清空目标"
-        aria-label="清空目标"
+      <div class="flex items-center gap-2 px-3 py-1.5">
+        <span class="text-indigo-400 text-xs flex-shrink-0">🎯 当前目标</span>
+        <span
+          class="text-indigo-200/90 text-xs truncate flex-1 min-w-0"
+          :title="displayGoal"
+        >{{ displayGoal }}</span>
+        <!-- 展开/收起辅导员进度详情（仅有子目标或进度时显示） -->
+        <button
+          v-if="hasCoachDetail"
+          @click="expanded = !expanded"
+          class="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full text-indigo-300/70 hover:text-indigo-200 hover:bg-indigo-500/20 transition-colors"
+          :title="expanded ? '收起进度' : '查看进度'"
+          :aria-label="expanded ? '收起进度' : '查看进度'"
+        >
+          <svg class="w-3 h-3 transition-transform" :class="expanded ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/>
+          </svg>
+        </button>
+        <button
+          @click="handleClearGoal"
+          :disabled="disabled"
+          class="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full text-indigo-300/70 hover:text-rose-300 hover:bg-rose-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          title="清空目标"
+          aria-label="清空目标"
+        >
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <!-- 辅导员进度展开区：当前子目标 + 进度评估 -->
+      <div
+        v-if="hasCoachDetail && expanded"
+        class="px-3 pb-2 pt-1.5 space-y-1 border-t border-indigo-500/20"
       >
-        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/>
-        </svg>
-      </button>
+        <div v-if="coachState?.currentSubgoal" class="text-[11px] text-indigo-200/80 leading-relaxed">
+          <span class="text-indigo-400/90">📍 子目标：</span>{{ coachState.currentSubgoal }}
+        </div>
+        <div v-if="coachState?.progressNote" class="text-[11px] text-indigo-200/70 leading-relaxed">
+          <span class="text-indigo-400/90">📊 进度：</span>{{ coachState.progressNote }}
+        </div>
+      </div>
     </div>
 
     <div class="flex items-end gap-2">

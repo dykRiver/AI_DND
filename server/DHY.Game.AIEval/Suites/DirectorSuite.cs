@@ -71,13 +71,13 @@ public class DirectorSuite : EvalSuiteBase<DirectorCase>
                 result.Checks.Add(CheckResult.Fail("期望节拍分档", e.ExpectBeatScale, scale));
         }
 
-        // 4. 章节档必须输出4-8个分段细纲，且每段细纲非空
+        // 4. 章节档必须输出6-10个分段细纲，且每段细纲非空
         if (scale == "chapter")
         {
-            if (output.Beats is { Count: >= 4 and <= 8 } && output.Beats.All(b => !string.IsNullOrWhiteSpace(b.Seed)))
+            if (output.Beats is { Count: >= 6 and <= 10 } && output.Beats.All(b => !string.IsNullOrWhiteSpace(b.Seed)))
                 result.Checks.Add(CheckResult.Ok("章节分段细纲", $"{output.Beats.Count}段"));
             else
-                result.Checks.Add(CheckResult.Fail("章节分段细纲", "4-8段且细纲非空",
+                result.Checks.Add(CheckResult.Fail("章节分段细纲", "6-10段且细纲非空",
                     output.Beats == null ? "无分段" : $"{output.Beats.Count}段"));
         }
 

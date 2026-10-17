@@ -50,6 +50,18 @@ public class GameActionResult
     /// Hub在读取上述字段前必须 await 此Task；预计算缓存前必须 await 并置 null。
     /// </summary>
     public Task? ScribeTask { get; set; }
+
+    /// <summary>
+    /// 辅导员本轮状态（仅真实推进轮 Full 跑且 goal_status=active 时回填；供 Hub 推送前端更新目标 chip 进度）。
+    /// 预计算 DryRun / 退化轮 / 超时失败 均为 null。
+    /// </summary>
+    public CoachState? CoachState { get; set; }
+
+    /// <summary>
+    /// 目标终结事件（辅导员判定 complete/failed 时回填；供 Hub 推送“目标达成/受阻”并清空 CurrentPlayerGoal+CoachState）。
+    /// 仅真实推进轮产生；active 时为 null。
+    /// </summary>
+    public CoachGoalEvent? CoachGoalEvent { get; set; }
 }
 
 /// <summary>

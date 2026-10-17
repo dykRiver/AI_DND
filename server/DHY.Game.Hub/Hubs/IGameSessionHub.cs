@@ -48,4 +48,7 @@ public interface IGameSessionHub
 
     /// <summary>建议行动选项推送（导演AI输出，供玩家快速选择）</summary>
     Task ReceiveSuggestedActions(SuggestedActionsDto actions);
+
+    /// <summary>玩家目标更新推送（辅导员进度 chip 更新 / 目标达成失效清空）</summary>
+    Task UpdatePlayerGoal(PlayerGoalUpdateDto goal);
 }

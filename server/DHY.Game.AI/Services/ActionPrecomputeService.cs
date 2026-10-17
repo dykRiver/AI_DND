@@ -27,11 +27,14 @@ public class PrecomputedActionCache
     /// <summary>预计算结果（含NarrativeInput、DiceResult、StateChanges等）</summary>
     public GameActionResult? Result { get; set; }
 
-    /// <summary>【L1改造后废弃、VIP模式复用】预生成叙事文本：非VIP恒为空（叙事点选后实时流式）；VIP模式在预计算阶段预生成的叙事正文，点选时秒回放。</summary>
+    /// <summary>【D4·完成快照】VIP流式预生成完成后的整章文本快照，仅用于日志与兜底；点选接管优先走 StreamBuffer。非VIP恒为空。</summary>
     public string NarrativeText { get; set; } = "";
 
-    /// <summary>【L1改造后废弃】章节档续写起始分镜索引：叙事统一点选后实时流式，此字段恒为 -1。</summary>
-    public int NextBeatIndex { get; set; } = -1;
+    /// <summary>【路径B】VIP流式预生成的可重放缓冲：导演层就绪后即挂载，玩家点选时接管（回放已缓冲 + 续读同一流），全程一次AI请求。非VIP恒为 null。</summary>
+    public NarrativeStreamBuffer? StreamBuffer { get; set; }
+
+    /// <summary>【路径B·D1】该选项预生成流的取消令牌源：点选时取消未选选项以止损白烧；随缓存失效或生产结束释放。</summary>
+    public CancellationTokenSource? NarrativeCts { get; set; }
 
     /// <summary>创建时间（用于TTL过期）</summary>
     public DateTime CreatedAt { get; set; }
@@ -55,7 +58,7 @@ public class SessionActionCache
     /// <summary>选项列表（恰好2个）</summary>
     public List<PrecomputedActionCache> Options { get; set; } = new();
 
-    /// <summary>预计算是否全部完成</summary>
+    /// <summary>预计算是否全部完成（指导演层就绪；VIP叙事预生成在后台续跑，不影响此标志与本服务返回 Task 的完成）</summary>
     public bool IsReady { get; set; }
 
     /// <summary>选项推送给前端的时刻（埋点①：统计玩家从看到选项到点击的思考间隔）</summary>
@@ -84,7 +87,7 @@ public class ActionPrecomputeService : ISingleton
     /// 并行预计算2个行动选项的完整AI流程（DryRun模式，不持久化）
     /// </summary>
     /// <param name="isAdult">会话级成人模式：透传给预掷的 ProcessActionInput.IsAdultMode，使预计算按当前模式走成人/非成人全链路（对齐 worldDifficultyOverride 的“下一轮预计算起生效”语义）</param>
-    /// <param name="isVip">会话级VIP模式：开启后预计算在导演层之后额外调用叙事AI预生成叙事文本并缓存，点选时秒回放（代价：2个选项各生成一次，玩家只用1个，另1个叙事token浪费）</param>
+    /// <param name="isVip">会话级VIP模式：开启后导演层就绪即返回（按钮~15s放开，与非VIP一致），另起后台任务为两个选项各预生成一次叙事并回填 NarrativeText；回填后点选秒回放，回填前点选降级实时流式（代价：2个选项各生成一次，玩家只用1个，另1个叙事token浪费）</param>
     public async Task PrecomputeAsync(long sessionId, List<SuggestedActionInfo> options, int? worldDifficultyOverride = null, bool isAdult = false, bool isVip = false)
     {
         if (options == null || options.Count < 2)
@@ -108,11 +111,11 @@ public class ActionPrecomputeService : ISingleton
         };
         _cache[sessionId] = sessionCache;
 
-        // 并行执行2个选项的预计算（原为串行 for）。
+        // ===== 阶段1：并行预计算导演层（两个选项）=====
         // 关键：ExecutionContext.SuppressFlow() 切断子任务对父 ExecutionContext 的继承，
         // 使每个选项子任务以空 AsyncLocal 上下文启动 → SqlSugarScope 为其分配独立连接，
         // 实现“任务间连接隔离(避免SqlSugar MARS并发冲突)、任务内共享同一连接(事务一致)”。
-        var tasks = new Task<(GameActionResult? result, string narrativeText, int nextBeatIndex)>[sessionCache.Options.Count];
+        var directorTasks = new Task<GameActionResult?>[sessionCache.Options.Count];
         for (int i = 0; i < sessionCache.Options.Count; i++)
         {
             int idx = i; // 闭包副本，避免捕获循环变量
@@ -120,13 +123,13 @@ public class ActionPrecomputeService : ISingleton
             var optionScale = sessionCache.Options[i].Scale;
             using (ExecutionContext.SuppressFlow())
             {
-                tasks[idx] = Task.Run(() => PrecomputeSingleOptionAsync(sessionId, optionActionText, idx, optionScale, worldDifficultyOverride, isAdult, isVip));
+                directorTasks[idx] = Task.Run(() => PrecomputeDirectorAsync(sessionId, optionActionText, idx, optionScale, worldDifficultyOverride, isAdult));
             }
         }
 
         try
         {
-            var results = await Task.WhenAll(tasks);
+            var results = await Task.WhenAll(directorTasks);
 
             // 检查缓存在计算期间是否被失效（玩家发起新行动触发InvalidateCache）
             if (!_cache.TryGetValue(sessionId, out var current) || current != sessionCache)
@@ -137,24 +140,54 @@ public class ActionPrecomputeService : ISingleton
 
             for (int i = 0; i < results.Length; i++)
             {
-                var (result, narrativeText, nextBeatIndex) = results[i];
+                var result = results[i];
                 sessionCache.Options[i].Result = result;
-                sessionCache.Options[i].NarrativeText = narrativeText;
-                sessionCache.Options[i].NextBeatIndex = nextBeatIndex;
                 // 仅当分类AI明确短路拒绝（infeasible）时标记不可行；
                 // 导演解析失败/流程中断（Result 非空、NarrativeInput 为空但 Feasibility 非 infeasible）不属于"不可行"，
                 // 保持可点击，点选时由 GetCachedResult 视为未命中回退常规流程
                 sessionCache.Options[i].IsFeasible = !(result != null && result.IsInfeasibleShortCircuit);
             }
 
+            // 导演层就绪即置 IsReady=true：本方法返回的 Task 到此完成，Hub 据此在 ~15s（导演层）放开按钮点击，
+            // VIP 与非 VIP 一致，不再等叙事预生成（叙事在下方阶段2后台续跑）。
             sessionCache.IsReady = true;
-            _logger.LogInformation("预计算完成: SessionId={SessionId}, 选项数={Count}", sessionId, sessionCache.Options.Count);
+            _logger.LogInformation("预计算完成(导演层): SessionId={SessionId}, 选项数={Count}", sessionId, sessionCache.Options.Count);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "预计算部分失败: SessionId={SessionId}", sessionId);
             // 即使部分失败也标记完成，已完成的选项仍可使用
             sessionCache.IsReady = true;
+            // 导演层整体异常时不启动叙事预生成（无有效 NarrativeInput）
+            return;
+        }
+
+        // ===== 阶段2：VIP 流式叙事预生成（后台续跑，不阻塞按钮放开）=====
+        // 【路径B】仅 VIP 且导演层成功时启动：为 NarrativeInput 非空的选项各自创建一个可重放 buffer + CTS，
+        //   并 detach 一个后台任务，用流式生成逐 chunk 写入 buffer（这是该选项唯一一次 AI 请求）。
+        //   buffer 在生成开始前即挂到 Options[idx].StreamBuffer，因此玩家在任意时刻点选都能接管：
+        //   已缓冲 chunk 立即回放、追平后续读同一个流，全程不新开请求。
+        //   点选时通过 InvalidateCache(keepOptionIndexForNarrative) 取消未选选项的 CTS 止损（D1）。
+        if (isVip)
+        {
+            for (int i = 0; i < sessionCache.Options.Count; i++)
+            {
+                int idx = i;
+                var narrativeInput = sessionCache.Options[idx].Result?.NarrativeInput;
+                // 不可行短路 / 导演解析失败（NarrativeInput=null）不预生成，点选时回放协调器已产出的文案或降级
+                if (narrativeInput == null)
+                    continue;
+
+                var buffer = new NarrativeStreamBuffer();
+                var cts = new CancellationTokenSource();
+                sessionCache.Options[idx].StreamBuffer = buffer;
+                sessionCache.Options[idx].NarrativeCts = cts;
+
+                using (ExecutionContext.SuppressFlow())
+                {
+                    _ = Task.Run(() => PregenerateNarrativeAsync(sessionId, narrativeInput, idx, buffer, cts));
+                }
+            }
         }
     }
 
@@ -199,10 +232,21 @@ public class ActionPrecomputeService : ISingleton
     }
 
     /// <summary>
-    /// 清除指定会话的缓存
+    /// 清除指定会话的缓存，并止损其 VIP 流式预生成（取消仍在跑的生产者）。
+    /// keepOptionIndexForNarrative：点选命中路径传入被选选项索引，保住它的生产者继续跑完供接管（D1）；
+    /// 其余调用点不传，即取消该会话所有预生成生产者。
     /// </summary>
-    public void InvalidateCache(long sessionId)
+    public void InvalidateCache(long sessionId, int? keepOptionIndexForNarrative = null)
     {
+        if (_cache.TryGetValue(sessionId, out var sessionCache))
+        {
+            for (int i = 0; i < sessionCache.Options.Count; i++)
+            {
+                if (i == keepOptionIndexForNarrative) continue;   // 保住被选选项的生产者，供点选接管
+                try { sessionCache.Options[i].NarrativeCts?.Cancel(); }
+                catch (ObjectDisposedException) { /* 生产者已自行释放，忽略 */ }
+            }
+        }
         _cache.TryRemove(sessionId, out _);
     }
 
@@ -226,20 +270,26 @@ public class ActionPrecomputeService : ISingleton
     }
 
     /// <summary>
-    /// 预计算单个选项（在独立scope中执行，DryRun模式）
+    /// 预计算单个选项的导演层（在独立scope中执行，DryRun模式，不持久化）。
+    /// 【L1改造】预计算深度砍到“导演层”：不生成叙事、不 await 书记官。
+    ///   - 叙事：非VIP改由玩家点选后实时流式生成（Hub 的 StreamNarrativeLiveAsync）；VIP 由阶段2 PregenerateNarrativeAsync 后台预生成。
+    ///     就绪时刻锁在“导演(~15s)”，VIP 不再因叙事预生成而延后按钮可点时刻。
+    ///   - 书记官：ProcessPlayerActionAsync 内已 fire-and-forget 启动（result.ScribeTask），此处保留句柄、不 await，
+    ///     让其后台与“就绪判定”并行完成；点选时再 await 回填 ScribeOutput/ItemHints/SuggestedActions。
+    ///     RunScribeTaskAsync 自建独立DI scope且自捕异常，句柄可安全跨请求存活到点选。
     /// </summary>
-    private async Task<(GameActionResult? result, string narrativeText, int nextBeatIndex)> PrecomputeSingleOptionAsync(
-        long sessionId, string actionText, int optionIndex, string actionScale, int? worldDifficultyOverride = null, bool isAdult = false, bool isVip = false)
+    private async Task<GameActionResult?> PrecomputeDirectorAsync(
+        long sessionId, string actionText, int optionIndex, string actionScale, int? worldDifficultyOverride = null, bool isAdult = false)
     {
         using var scope = _scopeFactory.CreateScope();
         var aiCoordinator = scope.ServiceProvider.GetRequiredService<AiCoordinatorService>();
 
         try
         {
-            _logger.LogDebug("预计算开始: SessionId={SessionId}, Option={Index}, Action={Action}",
+            _logger.LogDebug("预计算开始(导演层): SessionId={SessionId}, Option={Index}, Action={Action}",
                 sessionId, optionIndex, actionText);
 
-            // 1. 执行完整AI管线（DryRun=true，不持久化）
+            // 执行完整AI管线（DryRun=true，不持久化）
             var processInput = new ProcessActionInput
             {
                 SessionId = sessionId,
@@ -255,43 +305,57 @@ public class ActionPrecomputeService : ISingleton
 
             var result = await aiCoordinator.ProcessPlayerActionAsync(processInput);
 
-            // 2. 【L1改造】预计算深度砍到“导演层”：不再生成叙事、不再 await 书记官。
-            //    - 叙事：改由玩家点选后实时流式生成（Hub 的 StreamNarrativeLiveAsync）。
-            //      就绪时刻从“导演+叙事(~35s)”降到“导演(~15s)”，让选项在玩家读完本轮叙事时即已就绪。
-            //    - 书记官：ProcessPlayerActionAsync 内已 fire-and-forget 启动（result.ScribeTask），此处保留句柄、不 await，
-            //      让其后台与“就绪判定”并行完成；点选时再 await 回填 ScribeOutput/ItemHints/SuggestedActions。
-            //      RunScribeTaskAsync 自建独立DI scope且自捕异常，句柄可安全跨请求存活到点选。
-            //
-            //    【VIP模式】在导演层之后额外预生成叙事文本并缓存，点选时秒回放（首字延迟≈0）。
-            //    代价：2个选项各生成一次叙事，玩家只点1个 → 另1个叙事token浪费；且就绪时刻回升到“导演+叙事”。
-            //    不可行短路（NarrativeInput=null）不预生成，点选时回放协调器已产出的拒绝文案。
-            string narrativeText = "";
-            if (isVip && result?.NarrativeInput != null)
-            {
-                try
-                {
-                    var narrativeAi = scope.ServiceProvider.GetRequiredService<NarrativeAiService>();
-                    narrativeText = await narrativeAi.GenerateNarrativeAsync(result.NarrativeInput, sessionId);
-                    _logger.LogInformation("VIP预生成叙事完成: SessionId={SessionId}, Option={Index}, 字数={Length}",
-                        sessionId, optionIndex, narrativeText?.Length ?? 0);
-                }
-                catch (Exception ex)
-                {
-                    // 预生成失败不影响预计算结果：narrativeText 保持空，点选时自动降级为实时流式
-                    _logger.LogWarning(ex, "VIP预生成叙事失败(点选时降级实时流式): SessionId={SessionId}, Option={Index}", sessionId, optionIndex);
-                    narrativeText = "";
-                }
-            }
-
             _logger.LogDebug("预计算完成(导演层): SessionId={SessionId}, Option={Index}, 可行={Feasible}",
                 sessionId, optionIndex, result?.NarrativeInput != null);
 
-            return (result, narrativeText, -1);
+            return result;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "预计算失败: SessionId={SessionId}, Option={Index}", sessionId, optionIndex);
-            return (null, "", -1);
+            _logger.LogWarning(ex, "预计算失败(导演层): SessionId={SessionId}, Option={Index}", sessionId, optionIndex);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 【路径B·VIP模式】为单个选项在导演层就绪后后台流式预生成叙事正文，逐 chunk 写入可重放 buffer。
+    /// 这是该选项唯一一次 AI 请求；玩家点选时接管此流（回放已缓冲 + 续读后续），不再新开请求。
+    /// 被取消（未选选项止损，D1）视为正常收尾；失败则 buffer.Fail，点选降级实时流式（D2）。
+    /// </summary>
+    private async Task PregenerateNarrativeAsync(
+        long sessionId, NarrativeInput narrativeInput, int optionIndex,
+        NarrativeStreamBuffer buffer, CancellationTokenSource cts)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        try
+        {
+            var narrativeAi = scope.ServiceProvider.GetRequiredService<NarrativeAiService>();
+            await foreach (var chunk in narrativeAi.StreamNarrativeAsync(narrativeInput, sessionId, cts.Token))
+                buffer.Write(chunk);
+            buffer.Complete();
+
+            // D4：完成快照回填 NarrativeText（缓存可能已移除，仅作日志/兜底，消费者用 buffer 不依赖它）
+            var fullText = buffer.FullText;
+            if (_cache.TryGetValue(sessionId, out var sc) && optionIndex < sc.Options.Count)
+                sc.Options[optionIndex].NarrativeText = fullText;
+
+            _logger.LogInformation("VIP流式预生成完成: SessionId={SessionId}, Option={Index}, 字数={Length}",
+                sessionId, optionIndex, fullText.Length);
+        }
+        catch (OperationCanceledException)
+        {
+            // D1：未选选项被取消止损，属预期路径
+            buffer.Complete();
+            _logger.LogInformation("VIP流式预生成被取消(未选选项止损): SessionId={SessionId}, Option={Index}", sessionId, optionIndex);
+        }
+        catch (Exception ex)
+        {
+            buffer.Fail(ex);
+            _logger.LogWarning(ex, "VIP流式预生成失败(点选时降级实时流式): SessionId={SessionId}, Option={Index}", sessionId, optionIndex);
+        }
+        finally
+        {
+            cts.Dispose();
         }
     }
 }

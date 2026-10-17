@@ -47,6 +47,7 @@ async function resumeDungeon() {
       worldInfo: activeSession.value.worldInfo,
       gameState: activeSession.value.gameState,
       currentPlayerGoal: activeSession.value.currentPlayerGoal ?? '',
+      coachState: activeSession.value.coachState ?? null,
     })
 
     // 恢复叙事历史

@@ -252,8 +252,30 @@ public class DungeonExploreService : IDynamicApiController, ITransient
             },
             RecentNarratives = recentNarratives,
             SuggestedActions = suggestedActions,
-            // 玩家当前目标（断线续玩时同步给前端，用于渲染目标chip与清空按钮）
-            CurrentPlayerGoal = session.CurrentPlayerGoal ?? ""
+            // 玩家当前目标 + 辅导员状态（断线续玩时同步给前端，用于渲染目标chip与进度展开区）
+            CurrentPlayerGoal = session.CurrentPlayerGoal ?? "",
+            CoachState = ParseCoachStateView(session.CoachState)
         };
+    }
+
+    /// <summary>
+    /// 解析 session.CoachState JSON（AI 层 snake_case 序列化）→ Core 层扁平展示 DTO。
+    /// Core 不引用 DHY.Game.AI，故用 JObject 按 key 直读；无目标/解析失败返回 null（前端仅不显示进度，不影响续玩）。
+    /// </summary>
+    private static CoachStateViewDto? ParseCoachStateView(string? coachStateJson)
+    {
+        if (string.IsNullOrWhiteSpace(coachStateJson)) return null;
+        try
+        {
+            var jo = JObject.Parse(coachStateJson);
+            return new CoachStateViewDto
+            {
+                ClarifiedIntent = jo["clarified_intent"]?.ToString(),
+                CurrentSubgoal = jo["current_subgoal"]?.ToString(),
+                ProgressNote = jo["progress_note"]?.ToString(),
+                GoalStatus = jo["goal_status"]?.ToString() ?? "active"
+            };
+        }
+        catch { return null; }
     }
 }

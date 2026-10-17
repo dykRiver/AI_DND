@@ -270,8 +270,9 @@ public class GameSessionHub : Hub<IGameSessionHub>
                     }).ToList() ?? new List<SideQuestInfoDto>()
                 },
                 GameState = gameState,
-                // 同步玩家当前目标（断线恢复时前端渲染目标chip与清空按钮；新建副本时为空）
-                CurrentPlayerGoal = session?.CurrentPlayerGoal ?? ""
+                // 同步玩家当前目标 + 辅导员状态（断线恢复时前端渲染目标 chip 与进度展开区；新建副本时为空）
+                CurrentPlayerGoal = session?.CurrentPlayerGoal ?? "",
+                CoachState = BuildCoachStateDto(session?.CoachState)
             });
 
             // ★ 8. 恢复副本：推送离开前最后一轮的建议行动选项（方案A：续上离开前一刻）
@@ -419,6 +420,7 @@ public class GameSessionHub : Hub<IGameSessionHub>
     /// <summary>
     /// 设置玩家当前目标（自由输入框新语义：目标声明，非本轮行动）。
     /// 仅写库 + 推送一条轻量反馈消息，不触发任何AI调用、不刷新当前选项、不失效预计算缓存。
+    /// 覆盖目标同时清空辅导员状态 CoachState（旧 next_focus 不得泄漏到新目标），下一真实轮辅导员冷启动重新消歧。
     /// 下一轮书记官构造ScribeInput时读取该字段，让下一批suggested_actions围绕目标生成。
     /// </summary>
     public async Task SetPlayerGoal(SetPlayerGoalInput input)
@@ -445,9 +447,12 @@ public class GameSessionHub : Hub<IGameSessionHub>
                 return;
             }
 
+            // 覆盖目标同时清空辅导员状态：旧目标的 next_focus/子目标不得泄漏到新目标，
+            // 下一真实轮辅导员冷启动重新消歧（空目标时同样清空，回到无辅导员引导的现状）。
             session.CurrentPlayerGoal = goalText;
+            session.CoachState = null;
             await _sessionRep.AsUpdateable(session)
-                .UpdateColumns(s => new { s.CurrentPlayerGoal })
+                .UpdateColumns(s => new { s.CurrentPlayerGoal, s.CoachState })
                 .ExecuteCommandAsync();
 
             // 轻量反馈：仅在目标非空时推送确认消息（空目标视为静默覆盖，不弹提示）
@@ -584,6 +589,10 @@ public class GameSessionHub : Hub<IGameSessionHub>
                     {
                         await result.ScribeTask;
                     }
+
+                    // 辅导员目标生命周期推送（真实推进轮 Full 评估会回填；与点选回放轮共用 PushCoachLifecycleAsync）：
+                    //   达成/失效 → 系统消息 + 归档目标 + 空 chip；active → chip 进度。两字段均 null 则不推送。
+                    await PushCoachLifecycleAsync(hubContext, connectionId, result, sessionRep, session);
 
                     LedgerDelta? ledgerDelta = null;
                     if (result.ItemHints is { Count: > 0 })
@@ -938,6 +947,78 @@ public class GameSessionHub : Hub<IGameSessionHub>
     }
 
     /// <summary>
+    /// 辅导员目标生命周期推送（真实推进轮与点选回放轮共用）。
+    /// 达成/失效(CoachGoalEvent) → 推送系统消息 + 归档目标（清空 CurrentPlayerGoal+CoachState）+ 推送空 chip；
+    /// active(CoachState) → 推送 chip 进度（理解的目标/子目标/进度）。两字段均 null 则不推送。
+    /// </summary>
+    private async Task PushCoachLifecycleAsync(
+        IHubContext<GameSessionHub, IGameSessionHub> hubContext,
+        string connectionId,
+        GameActionResult result,
+        SqlSugarRepository<GameDungeonSession> sessionRep,
+        GameDungeonSession? session)
+    {
+        if (result.CoachGoalEvent != null)
+        {
+            var evt = result.CoachGoalEvent;
+            var isComplete = string.Equals(evt.Status, CoachGoalStatus.Complete, StringComparison.OrdinalIgnoreCase);
+            var isExpired = string.Equals(evt.Status, CoachGoalStatus.Expired, StringComparison.OrdinalIgnoreCase);
+            string msgType;
+            string msgText;
+            if (isComplete)
+            {
+                msgType = "success";
+                msgText = $"🎯 目标达成：{evt.ClarifiedIntent}{(string.IsNullOrWhiteSpace(evt.Note) ? "" : $"（{evt.Note}）")}。可设定新目标继续冒险。";
+            }
+            else if (isExpired)
+            {
+                msgType = "warning";
+                msgText = $"🕐 目标超期：{evt.ClarifiedIntent}（{evt.Note}），已自动归档。如仍在推进可重新声明目标。";
+            }
+            else
+            {
+                msgType = "warning";
+                msgText = $"⚠️ 目标受阻：{(string.IsNullOrWhiteSpace(evt.Note) ? evt.ClarifiedIntent : evt.Note)}。请调整或重新设定目标。";
+            }
+            await hubContext.Clients.Client(connectionId).ReceiveSystemMessage(new SystemMessageDto
+            {
+                Type = msgType,
+                Message = msgText,
+                Timestamp = DateTime.Now
+            });
+            // 归档目标：清空 CurrentPlayerGoal + CoachState（生命周期结束，下一轮不再引导）
+            if (session != null)
+            {
+                session.CurrentPlayerGoal = null;
+                session.CoachState = null;
+                await sessionRep.AsUpdateable(session)
+                    .UpdateColumns(s => new { s.CurrentPlayerGoal, s.CoachState })
+                    .ExecuteCommandAsync();
+            }
+            await hubContext.Clients.Client(connectionId).UpdatePlayerGoal(new PlayerGoalUpdateDto
+            {
+                CurrentPlayerGoal = "",
+                CoachState = null
+            });
+        }
+        else if (result.CoachState != null)
+        {
+            var cs = result.CoachState;
+            await hubContext.Clients.Client(connectionId).UpdatePlayerGoal(new PlayerGoalUpdateDto
+            {
+                CurrentPlayerGoal = session?.CurrentPlayerGoal ?? "",
+                CoachState = new CoachStateDto
+                {
+                    ClarifiedIntent = cs.ClarifiedIntent,
+                    CurrentSubgoal = cs.CurrentSubgoal,
+                    ProgressNote = cs.ProgressNote,
+                    GoalStatus = cs.GoalStatus ?? "active"
+                }
+            });
+        }
+    }
+
+    /// <summary>
     /// 拉取会话的有效已知情报并推送给客户端。
     /// </summary>
     private static async Task PushKnownAssetsAsync(
@@ -1110,7 +1191,8 @@ public class GameSessionHub : Hub<IGameSessionHub>
             }
 
             // 3. 清除当前缓存（越早越好，防重入）。落库/记账/选项构建见下（L1改造后移到 await 书记官之后）。
-            _precomputeService.InvalidateCache(input.SessionId);
+            //    【路径B·D1】保留被选选项的预生成生产者（供下方接管），仅取消未选选项的生产者以止损白烧。
+            _precomputeService.InvalidateCache(input.SessionId, keepOptionIndexForNarrative: input.OptionIndex);
 
             // 3.5 后台链：await书记官回填 → 落库 → 物资官记账 → 背包/情报推送 → 启动下一轮预计算。
             //     【L1改造】预计算只跑到导演层、未 await 书记官，故链首 await result.ScribeTask 回填
@@ -1127,6 +1209,10 @@ public class GameSessionHub : Hub<IGameSessionHub>
 
                     var sessionL = await sessionRep.GetFirstAsync(s => s.Id == input.SessionId);
                     var characterL = await characterRep.GetFirstAsync(c => c.SessionId == input.SessionId);
+
+                    // 辅导员目标生命周期推送（方案A：回放轮已在 ApplyCachedActionResultAsync 内 Full 评估并回填 result）：
+                    //   达成/失效 → 系统消息 + 归档目标 + 空 chip；active → chip 进度。与真实轮共用同一推送逻辑。
+                    await PushCoachLifecycleAsync(hubContext, connectionId, result, sessionRep, sessionL);
 
                     LedgerDelta? ledgerDelta = null;
                     if (result.ItemHints is { Count: > 0 })
@@ -1226,13 +1312,21 @@ public class GameSessionHub : Hub<IGameSessionHub>
             //    未预生成（非VIP、或VIP预生成未就绪/失败）→ 自动降级为实时流式，保证不卡住。
             var chunkType = result.DiceResult != null ? "action_result" : "narrative";
             string narrativeText;
-            if (!string.IsNullOrEmpty(cached.NarrativeText))
+            // 【路径B】优先接管 VIP 流式预生成的 buffer：回放已缓冲 chunk + 续读同一个流，全程一次 AI 请求。
+            //   buffer 尚未失败才接管；已失败（IsFaulted）或不存在（非VIP/预生成失败）则走下方降级。
+            if (cached.StreamBuffer is { IsFaulted: false } buf)
             {
+                narrativeText = await broadcast.StreamNarrativeFromBufferAsync(userId, buf, chunkType, Context.ConnectionAborted);
+            }
+            else if (!string.IsNullOrEmpty(cached.NarrativeText))
+            {
+                // 兜底：预生成完成快照（buffer 不可用时的兼容路径）
                 narrativeText = cached.NarrativeText;
                 await broadcast.StreamNarrativeAsync(userId, narrativeText, chunkType);
             }
             else if (result.NarrativeInput != null)
             {
+                // 降级：非VIP / buffer 失败 → 实时流式新开一次请求
                 narrativeText = await broadcast.StreamNarrativeLiveAsync(
                     userId, narrativeAi, result.NarrativeInput, input.SessionId, chunkType);
             }
@@ -1819,7 +1913,7 @@ public class GameSessionHub : Hub<IGameSessionHub>
                 })
                 .ExecuteCommandAsync();
 
-            // 6. 重置会话计数器（保留世界设定/主线/支线/隐藏内容/难度参数）；同时清空 LastSuggestedActions（新周目不应残留旧选项）
+            // 6. 重置会话计数器（保留世界设定/主线/支线/隐藏内容/难度参数）；同时清空 LastSuggestedActions（新周目不应残留旧选项）+ 玩家目标与辅导员状态（新周目旧意图不残留，玩家需重新设定目标）
             session.CurrentDay = 1;
             session.CurrentSegment = 0;
             session.TensionLevel = 1;
@@ -1829,11 +1923,13 @@ public class GameSessionHub : Hub<IGameSessionHub>
             session.StartTime = DateTime.Now;
             session.EndTime = null;
             session.LastSuggestedActions = null;
+            session.CurrentPlayerGoal = null;
+            session.CoachState = null;
             await sessionRep.AsUpdateable(session)
                 .UpdateColumns(s => new {
                     s.CurrentDay, s.CurrentSegment, s.TensionLevel,
                     s.InteractionCount, s.OvertimeCount, s.Status, s.StartTime, s.EndTime,
-                    s.LastSuggestedActions
+                    s.LastSuggestedActions, s.CurrentPlayerGoal, s.CoachState
                 })
                 .ExecuteCommandAsync();
 
@@ -1998,8 +2094,9 @@ public class GameSessionHub : Hub<IGameSessionHub>
                     SideQuests = sideQuests
                 },
                 GameState = gameState,
-                // 重新开始时目标依然保留（玩家可能想继续之前的意图）
-                CurrentPlayerGoal = session?.CurrentPlayerGoal ?? ""
+                // 重新开始=新周目，第6步已清空 CurrentPlayerGoal+CoachState，此处回填空值让前端收起目标 chip
+                CurrentPlayerGoal = session?.CurrentPlayerGoal ?? "",
+                CoachState = BuildCoachStateDto(session?.CoachState)
             });
 
             // ★ 重新开始：生成开场行动选项（方案C-1，复用书记官轻量模式，与首次进入一致）
@@ -2093,6 +2190,22 @@ public class GameSessionHub : Hub<IGameSessionHub>
             Message = message,
             Timestamp = DateTime.Now
         });
+    }
+
+    /// <summary>
+    /// 解析 session.CoachState JSON → 前端展示 DTO（无目标/解析失败返回 null）。断线恢复/重开时回填 DungeonReadyDto.CoachState。
+    /// </summary>
+    private static CoachStateDto? BuildCoachStateDto(string? coachStateJson)
+    {
+        var cs = PlayerCoachService.ParseState(coachStateJson);
+        if (cs == null) return null;
+        return new CoachStateDto
+        {
+            ClarifiedIntent = cs.ClarifiedIntent,
+            CurrentSubgoal = cs.CurrentSubgoal,
+            ProgressNote = cs.ProgressNote,
+            GoalStatus = cs.GoalStatus ?? "active"
+        };
     }
 
     /// <summary>

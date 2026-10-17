@@ -17,6 +17,7 @@ import type {
   SideQuestUpdate,
   SessionEndData,
   SuggestedActionsData,
+  PlayerGoalUpdate,
 } from '@/types/game'
 
 // ===== 模块级单例状态（跨组件共享同一个 SignalR 连接） =====
@@ -106,6 +107,8 @@ export function useSignalR() {
       gameStore.updateGameState(data.gameState)
       // 同步玩家当前目标（断线恢复/重新开始时服务端回填；新建副本时为空字符串，相当于清空本地目标）
       gameStore.setCurrentGoal(data.currentPlayerGoal ?? '')
+      // 同步辅导员状态（断线恢复/重新开始时回填目标 chip 进度；新建副本时为 null）
+      gameStore.setCoachState(data.coachState ?? null)
       gameStore.setLoading(false)
       onDungeonReadyCallback.value?.(data)
     })
@@ -176,6 +179,12 @@ export function useSignalR() {
     // ★ 建议行动选项（预计算快速选择）
     connection.value.on('ReceiveSuggestedActions', (data: SuggestedActionsData) => {
       gameStore.setSuggestedActions(data)
+    })
+
+    // ★ 玩家目标更新（辅导员每轮真实记账后推送进度 / 目标达成失效时推送空态收起 chip）
+    connection.value.on('UpdatePlayerGoal', (data: PlayerGoalUpdate) => {
+      gameStore.setCurrentGoal(data.currentPlayerGoal ?? '')
+      gameStore.setCoachState(data.coachState ?? null)
     })
   }
 

@@ -31,6 +31,13 @@ public class GameAiOptions : IConfigurableOptions
     /// 0 或未配置时按 1 处理。
     /// </summary>
     public int ChapterPrefetchBeats { get; set; }
+
+    /// <summary>
+    /// 辅导员目标最多持续轮数（代码兜底，防提示词失灵导致目标被无限延续）。
+    /// 从目标首次被辅导员评估的轮次起算，持续达到该轮数后仍为 active 则强制归档清空并提示玩家重设。
+    /// 0 = 关闭兜底（无限延续）。
+    /// </summary>
+    public int MaxCoachGoalRounds { get; set; }
 }
 
 /// <summary>

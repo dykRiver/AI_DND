@@ -359,6 +359,43 @@ public class DungeonReadyDto
 
     /// <summary>玩家当前目标（断线恢复/重新开始时同步给前端，用于渲染目标chip与清空按钮）</summary>
     public string CurrentPlayerGoal { get; set; } = "";
+
+    /// <summary>辅导员状态展示（断线恢复时同步，渲染目标 chip 展开区进度；无则 null）</summary>
+    public CoachStateDto? CoachState { get; set; }
+}
+
+#endregion
+
+#region 玩家目标/辅导员状态推送
+
+/// <summary>
+/// 辅导员状态展示（前端目标 chip 展开区：理解的目标 + 当前子目标 + 进度）。
+/// </summary>
+public class CoachStateDto
+{
+    /// <summary>消歧后的清晰目标</summary>
+    public string? ClarifiedIntent { get; set; }
+
+    /// <summary>当前滚动子目标</summary>
+    public string? CurrentSubgoal { get; set; }
+
+    /// <summary>进度评估说明</summary>
+    public string? ProgressNote { get; set; }
+
+    /// <summary>目标状态：active/complete/failed</summary>
+    public string GoalStatus { get; set; } = "active";
+}
+
+/// <summary>
+/// 玩家目标更新推送（每轮真实记账后推送 chip 进度；目标达成/失效/清空时推送空态收起 chip）。
+/// </summary>
+public class PlayerGoalUpdateDto
+{
+    /// <summary>玩家原始目标文本（达成/失效/清空时为空）</summary>
+    public string CurrentPlayerGoal { get; set; } = "";
+
+    /// <summary>辅导员状态展示（无目标或已终结时为 null，前端收起展开区）</summary>
+    public CoachStateDto? CoachState { get; set; }
 }
 
 #endregion

@@ -1,6 +1,10 @@
-# 叙事设计规范 v2.5.1
+# 叙事设计规范 v2.7.0
 
-> 版本：2.5.1 | 生效日期：2026-09-22 | 变更类型：**机制修正（player_choice_point 与 beat_scale 解耦）**。删除「`player_choice_point=true` → 强制 chapter」触发条件：`player_choice_point` 不再决定叙事长度，仅标记“重大抉择点”供书记官选项节奏档（细粒度/粗粒度）使用；`beat_scale` 分档依据回归“内容分量”（主线节点 / tension≥8 / 重大转折·关键揭示 / [推进型行动]）。同时收紧导演侧 `player_choice_point` 判定（默认 false，加不可逆后果限定 + 负面清单），根治其被频繁误置 true 导致 chapter 与细粒度选项泛滥的问题。对齐 `ai-architecture.md` v4.9.1
+> 版本：2.7.0 | 生效日期：2026-10-07 | 变更类型：**VIP流式预生成 + 点选中途接管（对齐 `ai-architecture.md` v4.13.0）**。VIP 阶段2从「非流式整章预生成 + 回填 `NarrativeText`」改为「流式预生成逐 chunk 写入可重放缓冲 `NarrativeStreamBuffer`」；玩家点选时**接管**这个正在进行的流（已缓冲立即回放、追平后续读同一流），**全程一次 AI 请求**，彻底消除「预生成没跑完就点选 → 降级新开第二个请求、旧请求无法取消白烧」的浪费。对叙事生成的字数预算（`perBeat`、`BuildChapterBeatMessages`、模型配置）无影响，仅改变预生成的调用方式（非流式→流式）与点选消费方式（回放文本→接管缓冲）。
+>
+> 历史版本 2.6.0（2026-10-07）：**章节档叙事篇幅翻倍（混合扩篇）**。整章目标 1800-3000 → **4500-6000**（硬顶 3000→6000、chapter clamp 区间 (1800,3000)→(4500,6000)、`perBeat` 下限 300→400）；beats 分段数 4-8→**6-10**、每段 ~600-800 字。导演模板同步 chapter 字数区间(3处)+beats 数量(1处)。代价：单章流式总时长 ~2min→~4min（读快于写缓冲仍成立、不卡顿），预生成 token/耗时翻倍。对齐 `ai-architecture.md` v4.11.0。
+>
+> 历史版本 2.5.1（2026-09-22）：**机制修正（player_choice_point 与 beat_scale 解耦）**。删除「`player_choice_point=true` → 强制 chapter」触发条件：`player_choice_point` 不再决定叙事长度，仅标记“重大抉择点”供书记官选项节奏档（细粒度/粗粒度）使用；`beat_scale` 分档依据回归“内容分量”（主线节点 / tension≥8 / 重大转折·关键揭示 / [推进型行动]）。同时收紧导演侧 `player_choice_point` 判定（默认 false，加不可逆后果限定 + 负面清单），根治其被频繁误置 true 导致 chapter 与细粒度选项泛滥的问题。对齐 `ai-architecture.md` v4.9.1
 >
 > 历史版本 2.5.0（2026-09-18）：**网文优先框架重构**。叙事AI从「文学品质 / 电影镜头叙事」转向「通俗小说 / 网文可读性优先」（大白话、中学生一遍读懂、情绪直给）。上游 GM（原前台导演）产出从「文学场景速写」改为「**剧情细纲**」（时间顺序的事件条目 + NPC台词大意 + 玩家状态变化），叙事AI**据细纲从零写正文**而非扩写润色散文种子；创作三原则 → **写作四原则**；场景文风模块由「句式/感官/文学手法」改为「**节奏/感受/禁忌**」；文风圣经禁止用电影流派或文学流派当语调；整链移除电影术语（导演/分镜/画面感/慢镜头）。同步删除叙事AI第7条「书面腔词汇」禁令（收窄过度，误伤正常中文）
 >
@@ -64,10 +68,10 @@ NPC对话是叙事张力与可读性的核心来源，对话是全篇最好读�
 |------|----------|----------|----------|
 | `micro` | 普通对话 / 观察 / 日常琐事 | 200-600 | 单次生成 |
 | `normal` | 探索推进 / 遭遇 / 支线事件 | 600-1200 | 单次生成 |
-| `chapter` | 主线节点 / 战斗高潮(tension≥8) / 重大转折·关键揭示 / [推进型行动] | 1800-3000 | **分段生成** |
+| `chapter` | 主线节点 / 战斗高潮(tension≥8) / 重大转折·关键揭示 / [推进型行动] | 4500-6000 | **分段生成** |
 
 - **单点决策**：分档由**导演AI**判定（非分类AI）。分档取决于后果规模（主线推进、tension、大事件连锁、关键揭示），只有导演掌握这些输出；且分档与「解除克制」本质是同一个动作。（v2.5.1 起 `player_choice_point` 从分档依据中移除——它只标记重大抉择点供书记官选项节奏档使用，与叙事长度解耦）
-- **字数解析（clamp）**：`ResolveNarrativeWordTarget` 按档位分层钳制——导演给出的 `narrative_word_target` 落在档位区间内即采用，越界则钳到边界，未给出取档位中值。字数硬顶从 800 提升到 **3000**。
+- **字数解析（clamp）**：`ResolveNarrativeWordTarget` 按档位分层钳制——导演给出的 `narrative_word_target` 落在档位区间内即采用，越界则钳到边界，未给出取档位中值。字数硬顶从 800 提升到 **6000**。
 - **回退**：导演未给出 `beat_scale` 时，按场景类型（`DetermineSceneType`）取居中默认值。
 - **注入**：目标字数动态注入叙事提示词的字数控制行；允许 ±15% 自然浮动。
 
@@ -75,20 +79,21 @@ NPC对话是叙事张力与可读性的核心来源，对话是全篇最好读�
 
 ### 章节档分段生成（v2.2.0，v2.5.0 分镜→分段细纲）
 
-chapter 档时 GM 额外输出**分段细纲**（`beats`，4-8 个有序子节拍，每个含 `seed` / `beat_type` / `focus`）。`seed` 写法同 `narrative_seed`（事件条目 + NPC台词大意 + 状态变化），每个 beat 至少含一个实质事件或一段对话（不为几秒钟的动作单独开 beat）。叙事AI按分段**逐段调用模型**，而非单次调用生成整章：
+chapter 档时 GM 额外输出**分段细纲**（`beats`，6-10 个有序子节拍，每个含 `seed` / `beat_type` / `focus`）。`seed` 写法同 `narrative_seed`（事件条目 + NPC台词大意 + 状态变化），每个 beat 至少含一个实质事件或一段对话（不为几秒钟的动作单独开 beat）。叙事AI按分段**逐段调用模型**，而非单次调用生成整章：
 
-- **单段目标**：总目标字数 ÷ 分段数（每段下限 300 字）；写完事件字数不够就加对话和玩家的直接感受，不回头加描写。
+- **单段目标**：总目标字数 ÷ 分段数（每段下限 400 字）；写完事件字数不够就加对话和玩家的直接感受，不回头加描写。
 - **前序上下文**：已生成正文作为上下文注入下一段（仅取末尾约 1200 字，防止上下文膨胀）。
 - **流式拼接**：各段 chunk 依次流式 `yield` 输出，段间插入空行分隔。Hub 与前端**零改动**（消费的仍是同一个 chunk 流）。
 - 流式 / 非流式两条路径均支持章节档分段。
 
-### 章节档与行动预计算（L1，v2.4.0）
+### 章节档与行动预计算（L1 + VIP接管，v2.7.0）
 
-[行动选项预计算](ai-architecture.md#行动选项预计算机制快进选择) v4.1.0 起下调到 **L1（导演层）**：预计算**不再预生成任何叙事正文**，`micro`/`normal`/`chapter` 三档点选后**一律走实时流式生成**。
+[行动选项预计算](ai-architecture.md#行动选项预计算机制快进选择) v4.1.0 起下调到 **L1（导演层）**：预计算默认**不预生成叙事正文**，`micro`/`normal`/`chapter` 三档点选后**一律走实时流式生成**；**开启 VIP 时**（v4.13.0）后台流式预生成写入可重放缓冲，点选接管该缓冲（见下）。
 
-- **章节档点选后**：调 `StreamNarrativeLiveAsync` → 叙事AI按分段细纲（`beats`）逐段实时生成并流式推送（即上文「章节档分段生成」机制，只是触发点从预计算移到点选后）。
-- **读快于写的天然缓冲**：读一段（~40s）慢于生成一段（~15-25s），分段流式始终领先阅读指针，玩家几乎无感等待。
-- **旧机制停用**：v2.3.0 的「预取首 N 段 + 秒回放前缀 + 断点续写」（`ChapterPrefetchBeats` / `nextBeatIndex` / `StreamChapterContinuationAsync`）在 L1 下不再被点选路径调用——**保留代码但不启用**。
+- **非 VIP 点选后**：调 `StreamNarrativeLiveAsync` → 叙事AI按分段细纲（`beats`）逐段实时生成并流式推送（即上文「章节档分段生成」机制，只是触发点从预计算移到点选后）。
+- **VIP 点选（v2.7.0 接管式）**：后台已用**流式**为被选选项预生成、逐 chunk 写入 `NarrativeStreamBuffer`；点选时 `StreamNarrativeFromBufferAsync` **接管**该流——已缓冲 chunk 立即回放（首字≈0），追平后续读同一个流的后续 chunk，直到完成。**无论预生成跑到哪，全程一次 AI 请求**，不再像 v2.6.0 那样「没跑完点选就降级新开第二个请求」。
+- **读快于写的天然缓冲**：读一段（600-800字，~50-65s）慢于生成一段（~25-35s），分段流式始终领先阅读指针，玩家几乎无感等待——VIP 接管式沿用同一缓冲特性。
+- **旧机制已删除**：v2.3.0 的「预取首 N 段 + 秒回放前缀 + 断点续写」（`ChapterPrefetchBeats` / `nextBeatIndex` / `GenerateChapterPrefixAsync` / `StreamChapterContinuationAsync` / `StreamChapterResumeAsync`）在 L1 下即为死代码，**已于 v4.13.0 删除**。
 
 ### 章节档GM主动性（v2.2.0）
 
@@ -201,6 +206,8 @@ chapter 档**解除GM克制**：允许 GM 主动升级冲突、引入剧情转�
 
 | 版本 | 日期 | 变更类型 | 说明 |
 |------|------|----------|------|
+| 2.7.0 | 2026-10-07 | **机制重构** | VIP流式预生成 + 点选中途接管（对齐 `ai-architecture.md` v4.13.0）：VIP 阶段2从非流式整章预生成回填 `NarrativeText` 改为流式逐 chunk 写入可重放缓冲 `NarrativeStreamBuffer`；点选经 `StreamNarrativeFromBufferAsync` 接管（回放已缓冲 + 续读同一流），全程一次 AI 请求，消除「预生成没跑完点选就降级新开第二个请求、旧请求无法取消白烧」的浪费；`InvalidateCache(keepOptionIndexForNarrative)` 取消未选选项止损。删除旧 L3 前缀预取死代码 `GenerateChapterPrefixAsync`/`StreamChapterContinuationAsync`/`StreamChapterResumeAsync`/`NextBeatIndex`。对叙事字数预算（`perBeat`/`BuildChapterBeatMessages`/模型配置）无影响 |
+| 2.6.0 | 2026-10-07 | **篇幅调整** | 章节档叙事篇幅翻倍（混合扩篇）：整章目标 1800-3000 → **4500-6000**（硬顶 3000→6000、chapter clamp 区间 (1800,3000)→(4500,6000)、`perBeat` 下限 300→400）；beats 分段数 4-8→**6-10**、每段 ~600-800 字。采用「段数适度增加 + 每段适度加长」混合方式，既拉长整章又避免单段过长注水（路径A 纯加长的注水风险）。导演模板 `director_front_system.txt`/`director_adult_front_system.txt` 同步 chapter 字数区间(3处)+beats 数量(1处)。代码侧：`AiCoordinatorService.MaxNarrativeWordTarget`/`ResolveNarrativeWordTarget`、`NarrativeAiService` 三处 `perBeat` 下限。代价：单章流式总时长 ~2min→~4min（读快于写缓冲仍成立），预生成 token/耗时翻倍、VIP 秒回放命中率下降。对齐 `ai-architecture.md` v4.11.0；需 rebuild 刷新 bin 模板副本生效 |
 | 2.5.1 | 2026-09-22 | **机制修正** | `player_choice_point` 与 `beat_scale` 解耦：删除「`player_choice_point=true`→强制 chapter」触发条件，`player_choice_point` 不再决定叙事长度，仅标记“重大抉择点”供书记官选项节奏档（细粒度/粗粒度）使用；chapter 触发情境改为「主线节点 / 战斗高潮(tension≥8) / 重大转折·关键揭示 / [推进型行动]」。导演侧同步收紧 `player_choice_point` 判定（默认 false + 不可逆后果限定 + 负面清单），根治紧张度 5~6 普通轮频繁误置 true 并顶成 chapter、导致细粒度选项泛滥的问题。对齐 `ai-architecture.md` v4.9.1；仅提示词调整，代码层未改 |
 | 2.5.0 | 2026-09-18 | **框架重构** | 网文优先：叙事AI从「文学品质/电影镜头」转为「通俗小说/网文可读性优先」（大白话、中学生一遍读懂、情绪直给）；创作三原则→写作四原则（先说清事/大白话优先/情绪直给/一个细节就够）+可量化硬性禁令；场景文风模块由句式/感官/文学手法重写为节奏/感受/禁忌；文风圣经禁用电影/文学流派当语调；创作思考指南重写为事件驱动；上游 GM 产出从文学场景速写改为剧情细纲（事件条目+台词大意+状态变化）、beats 分镜表→分段细纲，叙事AI据细纲从零写正文；整链移除电影术语（导演/分镜/画面感/慢镜头）；删除叙事AI第7条书面腔词汇禁令。代码侧：`NarrativeAiService.BuildSceneStyleModule` 重写、`BuildChapterBeatMessages` 标签改细纲、`BuildBlueprintText`/`BuildProseGuidanceText` 标签改名；`director_front_system.txt` 角色改 GM、narrative_seed/prose_guidance/beats 规则改细纲；`architect_system.txt` style_bible 规则重写；`narrative_system.txt`/`narrative_adult_system.txt` 角色与规范重写 |
 | 2.4.0 | 2026-09-13 | **性能优化** | 对齐 `ai-architecture.md` v4.1.0（L1）：预计算砍到导演层、不再预生成叙事正文；章节档点选后统一走实时流式分段生成（`StreamNarrativeLiveAsync`），旧「预取首 N 段 + 秒回放前缀」机制（`ChapterPrefetchBeats`/`nextBeatIndex`/`StreamChapterContinuationAsync`）停用（保留代码不启用） |

@@ -98,25 +98,31 @@ public class NarrativeAiService : ITransient
         // 章节档：按分镜逐段顺序流式生成，段间插入空行分隔，chunk 依次 yield，Hub/前端无感
         if (IsChapterScale(input))
         {
+            var chapterCharCount = 0;
             await foreach (var chunk in StreamChapterBeatsCoreAsync(input, client, config, aiRole, 0, "", ct))
+            {
+                chapterCharCount += chunk.Length;
                 yield return chunk;
+            }
 
             sw.Stop();
             if (_modelFactory.IsDebugEnabled)
-                AiDebugLogger.LogCallChain(aiRole, $"章节档流式叙事完成, 分镜{input.DirectorBlueprint!.Beats!.Count}段, 耗时{sw.ElapsedMilliseconds}ms");
+                AiDebugLogger.LogCallChain(aiRole, $"章节档流式叙事完成, 分镜{input.DirectorBlueprint!.Beats!.Count}段, 字数: {chapterCharCount}, 耗时{sw.ElapsedMilliseconds}ms");
             yield break;
         }
 
         var singleMessages = BuildNarrativeMessages(input);
 
+        var singleCharCount = 0;
         await foreach (var chunk in client.StreamChatCompletionAsync(singleMessages, config, ct, aiRole: aiRole))
         {
+            singleCharCount += chunk.Length;
             yield return chunk;
         }
 
         sw.Stop();
         if (_modelFactory.IsDebugEnabled)
-            AiDebugLogger.LogCallChain(aiRole, $"流式叙事完成, 耗时{sw.ElapsedMilliseconds}ms");
+            AiDebugLogger.LogCallChain(aiRole, $"流式叙事完成, 字数: {singleCharCount}, 耗时{sw.ElapsedMilliseconds}ms");
     }
 
     private List<ChatMessage> BuildNarrativeMessages(NarrativeInput input)
@@ -184,7 +190,7 @@ public class NarrativeAiService : ITransient
     {
         var beats = input.DirectorBlueprint!.Beats!;
         var totalTarget = input.WordTarget > 0 ? input.WordTarget : 2000;
-        var perBeat = Math.Max(300, totalTarget / beats.Count);
+        var perBeat = Math.Max(400, totalTarget / beats.Count);
         var chapterSoFar = new StringBuilder();
         var totalInput = 0;
         var totalOutput = 0;
@@ -234,7 +240,7 @@ public class NarrativeAiService : ITransient
     {
         var beats = input.DirectorBlueprint!.Beats!;
         var totalTarget = input.WordTarget > 0 ? input.WordTarget : 2000;
-        var perBeat = Math.Max(300, totalTarget / beats.Count);
+        var perBeat = Math.Max(400, totalTarget / beats.Count);
         var chapterSoFar = new StringBuilder(seedText ?? "");
 
         for (var i = Math.Max(0, startIndex); i < beats.Count; i++)
@@ -253,82 +259,6 @@ public class NarrativeAiService : ITransient
                 yield return chunk;
             }
         }
-    }
-
-    /// <summary>
-    /// 章节档预取：非流式生成前 prefetchBeats 个分镜，拼接为前缀文本。
-    /// 供预计算使用；返回（前缀文本, 下一段起始索引）。
-    /// </summary>
-    public async Task<(string prefixText, int nextBeatIndex)> GenerateChapterPrefixAsync(
-        NarrativeInput input, int prefetchBeats, long? sessionId = null)
-    {
-        var beats = input.DirectorBlueprint?.Beats;
-        if (beats == null || beats.Count == 0)
-            return ("", -1);
-
-        var sw = Stopwatch.StartNew();
-        var aiRole = input.IsAdult ? "AdultNarrative" : "Narrative";
-        var config = _modelFactory.GetModelConfig(aiRole);
-        var client = _modelFactory.CreateClient(config);
-
-        var count = Math.Clamp(prefetchBeats, 1, beats.Count);
-        var totalTarget = input.WordTarget > 0 ? input.WordTarget : 2000;
-        var perBeat = Math.Max(300, totalTarget / beats.Count);
-        var chapterSoFar = new StringBuilder();
-        var totalInput = 0;
-        var totalOutput = 0;
-
-        for (var i = 0; i < count; i++)
-        {
-            var messages = BuildChapterBeatMessages(input, beats[i], chapterSoFar.ToString(), perBeat, i, beats.Count);
-            var beatResult = await client.ChatCompletionAsync(messages, config, aiRole: aiRole);
-            totalInput += beatResult.InputTokens;
-            totalOutput += beatResult.OutputTokens;
-
-            if (!beatResult.IsSuccess)
-            {
-                _logger.LogWarning("章节档预取分镜失败(第{Index}/{Total}段): {Error}", i + 1, beats.Count, beatResult.ErrorMessage);
-                continue;
-            }
-
-            if (chapterSoFar.Length > 0)
-                chapterSoFar.Append("\n\n");
-            chapterSoFar.Append(beatResult.Content.Trim());
-        }
-
-        sw.Stop();
-        var prefix = chapterSoFar.ToString();
-        await LogAiCallAsync(sessionId, config.ModelId,
-            new AiCompletionResult { IsSuccess = true, Content = prefix, InputTokens = totalInput, OutputTokens = totalOutput },
-            sw.ElapsedMilliseconds, input.IsAdult);
-
-        if (_modelFactory.IsDebugEnabled)
-            AiDebugLogger.LogCallChain(aiRole, $"章节档预取完成, 预取{count}/{beats.Count}段, 前缀字数: {prefix.Length}");
-
-        return (prefix, count);
-    }
-
-    /// <summary>
-    /// 章节档续写：从 startIndex 起实时流式生成剩余分镜，seedText 为已预取的前缀正文（作为上下文）。
-    /// 供 Hub 命中缓存时回放前缀后无缝接上实时续写使用。
-    /// </summary>
-    public async IAsyncEnumerable<string> StreamChapterContinuationAsync(
-        NarrativeInput input,
-        int startIndex,
-        string seedText,
-        long? sessionId = null,
-        [EnumeratorCancellation] CancellationToken ct = default)
-    {
-        var beats = input.DirectorBlueprint?.Beats;
-        if (beats == null || startIndex >= beats.Count)
-            yield break;
-
-        var aiRole = input.IsAdult ? "AdultNarrative" : "Narrative";
-        var config = _modelFactory.GetModelConfig(aiRole);
-        var client = _modelFactory.CreateClient(config);
-
-        await foreach (var chunk in StreamChapterBeatsCoreAsync(input, client, config, aiRole, startIndex, seedText, ct))
-            yield return chunk;
     }
 
     /// <summary>

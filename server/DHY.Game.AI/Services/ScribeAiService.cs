@@ -134,8 +134,18 @@ public class ScribeAiService : ITransient
             messages.Add(new ChatMessage { Role = "user", Content = $"[本轮既定事实(GM输出)]\n{input.DirectorFacts}" });
             messages.Add(new ChatMessage { Role = "assistant", Content = "已了解本轮既定事实，我将据此如实记账。" });
 
-            // 玩家当前目标（自由输入框提交的中长期意图，非本轮行动）：非空时注入，让书记官生成suggested_actions时兼顾玩家意图
-            if (!string.IsNullOrWhiteSpace(input.PlayerGoal))
+            // 目标引导注入：辅导员策略指引优先（含消歧意图+子目标+next_focus），无指引时回退玩家原始目标（现状行为）。
+            // 两者互斥：CoachFocus 非空即已由辅导员消化 PlayerGoal，不再重复注入原文，避免指令冲突。
+            if (!string.IsNullOrWhiteSpace(input.CoachFocus))
+            {
+                messages.Add(new ChatMessage
+                {
+                    Role = "user",
+                    Content = $"[辅导员策略指引]\n{input.CoachFocus}\n（玩家辅导员对玩家目标的消歧与进度评估结论，next_focus 为本轮最该推进的策略方向。生成suggested_actions时须让至少一个选项服务 next_focus 主方向，但不得脱离本轮既定事实与世界状态；若方向与当前情境冲突，优先输出化解冲突的选项。）"
+                });
+                messages.Add(new ChatMessage { Role = "assistant", Content = "已了解辅导员策略指引，我将让建议选项服务 next_focus 主方向。" });
+            }
+            else if (!string.IsNullOrWhiteSpace(input.PlayerGoal))
             {
                 messages.Add(new ChatMessage
                 {

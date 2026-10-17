@@ -18,6 +18,11 @@ public class AiModelFactory : ITransient
     /// </summary>
     public bool IsDebugEnabled => _options.EnableDebugLog;
 
+    /// <summary>
+    /// 辅导员目标最多持续轮数（0=关闭兜底），供协调器判定目标超期强制归档。
+    /// </summary>
+    public int MaxCoachGoalRounds => _options.MaxCoachGoalRounds;
+
     public AiModelFactory(
         IHttpClientFactory httpClientFactory,
         IOptions<GameAiOptions> options,

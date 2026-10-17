@@ -75,6 +75,28 @@ public class ActiveSessionCheckOutput
 
     /// <summary>玩家当前目标（断线续玩时同步给前端，用于渲染目标chip与清空按钮）</summary>
     public string CurrentPlayerGoal { get; set; } = "";
+
+    /// <summary>辅导员状态展示（断线续玩时同步，渲染目标 chip 展开区进度；无则 null）</summary>
+    public CoachStateViewDto? CoachState { get; set; }
+}
+
+/// <summary>
+/// 辅导员状态展示（Core 层扁平视图，供断线续玩回填；结构对齐 Hub 的 CoachStateDto）。
+/// Core 不引用 DHY.Game.AI，由 DungeonExploreService 用 JObject 从 CoachState JSON 解析填充。
+/// </summary>
+public class CoachStateViewDto
+{
+    /// <summary>消歧后的清晰目标</summary>
+    public string? ClarifiedIntent { get; set; }
+
+    /// <summary>当前滚动子目标</summary>
+    public string? CurrentSubgoal { get; set; }
+
+    /// <summary>进度评估说明</summary>
+    public string? ProgressNote { get; set; }
+
+    /// <summary>目标状态：active/complete/failed</summary>
+    public string GoalStatus { get; set; } = "active";
 }
 
 public class ActiveSessionWorldInfo

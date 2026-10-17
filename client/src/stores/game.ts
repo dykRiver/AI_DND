@@ -14,6 +14,7 @@ import type {
   SideQuestUpdate,
   SessionEndData,
   SuggestedActionsData,
+  CoachState,
 } from '@/types/game'
 
 // ========== localStorage 持久化辅助 ==========
@@ -25,6 +26,8 @@ interface PersistedState {
   gameState: GameState
   /// 玩家当前目标（自由输入框提交的中长期意图，跨页面刷新保留）
   currentGoal: string
+  /// 辅导员状态（目标 chip 进度展示，跨页面刷新保留）
+  coachState: CoachState | null
 }
 
 function loadPersistedState(): PersistedState | null {
@@ -136,6 +139,10 @@ export const useGameStore = defineStore('game', () => {
   //   - DungeonReady 时从服务端回填（跨设备/刷新一致性）
   const currentGoal = ref<string>(persisted?.currentGoal ?? '')
 
+  // ★ 辅导员状态（玩家辅导员对目标的消歧 + 子目标 + 进度，供目标 chip 展开区展示）
+  //   来源：真实推进轮 UpdatePlayerGoal 推送 / DungeonReady / 断线续玩回填；目标达成失效或清空时置 null。
+  const coachState = ref<CoachState | null>(persisted?.coachState ?? null)
+
   function toggleAdultMode() {
     isAdultMode.value = !isAdultMode.value
   }
@@ -161,6 +168,7 @@ export const useGameStore = defineStore('game', () => {
       worldInfo: worldInfo.value,
       gameState: gameState.value,
       currentGoal: currentGoal.value,
+      coachState: coachState.value,
     })
   }
 
@@ -315,6 +323,13 @@ export const useGameStore = defineStore('game', () => {
   /// 清空玩家当前目标（点击清空按钮后调用，与服务端 SetPlayerGoal('') 同步）
   function clearCurrentGoal() {
     currentGoal.value = ''
+    coachState.value = null
+    persist()
+  }
+
+  /// 设置辅导员状态（UpdatePlayerGoal 推送 / DungeonReady 回填时调用；null 表示无进度可展示）
+  function setCoachState(state: CoachState | null) {
+    coachState.value = state
     persist()
   }
 
@@ -332,6 +347,7 @@ export const useGameStore = defineStore('game', () => {
     suggestedActions.value = null
     knownAssets.value = []
     currentGoal.value = ''
+    coachState.value = null
     clearPersistedState()
   }
 
@@ -358,12 +374,14 @@ export const useGameStore = defineStore('game', () => {
     worldInfo: WorldInfo
     gameState: GameState
     currentPlayerGoal?: string
+    coachState?: CoachState | null
   }) {
     sessionId.value = data.sessionId
     worldInfo.value = data.worldInfo
     gameState.value = data.gameState
     // 目标以服务端为权威（跨设备/刷新后仍保留玩家之前设置的意图）
     currentGoal.value = data.currentPlayerGoal ?? ''
+    coachState.value = data.coachState ?? null
     showWorldInfo.value = true
     isInputDisabled.value = false
     isLoading.value = false
@@ -426,6 +444,8 @@ export const useGameStore = defineStore('game', () => {
     currentGoal,
     setCurrentGoal,
     clearCurrentGoal,
+    coachState,
+    setCoachState,
     clearSession,
     clearNarrativeHistory,
     restoreFromServer,

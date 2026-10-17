@@ -136,6 +136,7 @@ async function handleRestartConfirm() {
     <PlayerInput
       :disabled="gameStore.isInputDisabled || gameStore.isLoading"
       :current-goal="gameStore.currentGoal"
+      :coach-state="gameStore.coachState"
       @send="handleSend"
       @clear-goal="clearGoal"
     />

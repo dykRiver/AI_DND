@@ -136,4 +136,12 @@ public class GameDungeonSession : EntityBase
     /// </summary>
     [SugarColumn(ColumnDescription = "玩家当前目标", ColumnDataType = "nvarchar(max)", IsNullable = true)]
     public string? CurrentPlayerGoal { get; set; }
+
+    /// <summary>
+    /// 玩家辅导员状态JSON（消歧意图 + 滚动子目标 + 进度 + next_focus）。结构见 DHY.Game.AI.Dtos.CoachState。
+    /// 真实推进轮辅导员Full跑后覆盖写入（权威进度评估点）；预计算DryRun/开场/不可行短路只读复用其 next_focus、不写。
+    /// 提交/变更/清空目标时一并清空；断线续玩/刷新可恢复。不参与分类/导演/叙事链路。
+    /// </summary>
+    [SugarColumn(ColumnDescription = "玩家辅导员状态JSON", ColumnDataType = "nvarchar(max)", IsNullable = true)]
+    public string? CoachState { get; set; }
 }

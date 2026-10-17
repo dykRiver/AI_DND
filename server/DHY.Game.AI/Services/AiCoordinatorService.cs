@@ -185,7 +185,7 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             if (!input.DryRun)
             {
                 var rejectScribeInput = await BuildSuggestionsOnlyInputAsync(sessionId, actionText, rejectText, characterName, isAdult);
-                rejectResult.ScribeTask = RunScribeTaskAsync(sessionId, rejectResult, rejectScribeInput, session.InteractionCount, false, npcs);
+                rejectResult.ScribeTask = RunScribeTaskAsync(sessionId, rejectResult, rejectScribeInput, session.InteractionCount, false, npcs, session.CoachState);
             }
 
             return rejectResult;
@@ -253,10 +253,13 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
                 difficultyModifier,
                 dryRun: input.DryRun);
 
-            // 构建判定结果文本（注入导演AI上下文）
+            // 构建判定结果文本（注入导演AI/书记官上下文）：只给四档成败结论，不给点数/DC算式。
+            // 导演与书记官模板均只按[大成功]/[成功]/[失败]/[大失败]四档反应，无需数字；
+            // 传入算式反而会诱发模型自行验算（世界难度修正下算式与结论可能不自洽），导致思考膨胀甚至输出截断。
+            // 完整点数/DC仍保留在下方 LogOrchestration 日志与前端骰子展示（OnDiceRolled）中。
             var tag = diceResult.IsNatural20 ? "大成功" : diceResult.IsNatural1 ? "大失败" : diceResult.IsSuccess ? "成功" : "失败";
             var modSign = diceResult.Modifier >= 0 ? "+" : "";
-            judgmentOutcome = $"{diceResult.SkillName} DC{diceResult.DC} → D20={diceResult.D20Roll}{modSign}{diceResult.Modifier}={diceResult.Total} vs 有效DC{diceResult.EffectiveDC} [{tag}]";
+            judgmentOutcome = $"{diceResult.SkillName}检定：[{tag}]";
 
             if (DebugEnabled)
                 AiDebugLogger.LogOrchestration("骰子结果", $"D20={diceResult.D20Roll}{modSign}{diceResult.Modifier}={diceResult.Total} vs 原始DC{diceResult.DC}+世界难度{difficultyModifier:+#;-#;0}=有效DC{diceResult.EffectiveDC} → {tag}");
@@ -429,7 +432,7 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             // 玩家当前目标（自由输入框提交）：让本轮书记官产出的下一批suggested_actions围绕该目标生成
             PlayerGoal = session.CurrentPlayerGoal
         };
-        result.ScribeTask = RunScribeTaskAsync(sessionId, result, scribeInput, applyRound, input.DryRun, npcs);
+        result.ScribeTask = RunScribeTaskAsync(sessionId, result, scribeInput, applyRound, input.DryRun, npcs, session.CoachState);
 
         return result;
     }
@@ -671,6 +674,8 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
     
             var character = await _characterRep.GetFirstAsync(c => c.SessionId == sessionId);
             var directorOutput = result.NarrativeInput?.DirectorBlueprint;
+            // 方案A：捕获递增前的交互轮次，供末尾辅导员评估落库 updated_round（与真实轮 applyRound 语义一致）
+            var applyRound = session.InteractionCount;
     
             // 书记官始终走完整记账模式，只要输出了 WorldStateChanges 就落库。
             // 预计算DryRun时书记官已回填ScribeOutput但未落库，此处补落。
@@ -727,6 +732,39 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "缓存行动时段推进失败: SessionId={SessionId}", sessionId);
+                }
+            }
+
+            // 7. ★点选回放轮辅导员 Full 评估（方案A）：世界状态已落库(S+ΔA)，此处读最新库状态评估，
+            //    与下一轮预计算B的书记官天然同源（B 启动时同样 GetCurrentStateForDirectorAsync 读到 S+ΔA）。
+            //    门控：仅 PlayerGoal 非空 + 导演蓝图可得才评估；异常/超时绝不影响已完成的落库与下游物资官/预计算。
+            if (!string.IsNullOrWhiteSpace(session.CurrentPlayerGoal) && directorOutput != null)
+            {
+                try
+                {
+                    using var coachScope = _scopeFactory.CreateScope();
+                    var coach = coachScope.ServiceProvider.GetRequiredService<PlayerCoachService>();
+                    var npcs = await _npcService.GetCriticalNpcsAsync(sessionId);
+                    var coachInput = new CoachInput
+                    {
+                        PlayerGoal = session.CurrentPlayerGoal!,
+                        PrevCoachState = session.CoachState,
+                        // 683 落库后重读 = S+ΔA（含时段推进），与 B 预计算书记官同源
+                        WorldState = await _worldState.GetCurrentStateForDirectorAsync(sessionId),
+                        DirectorFacts = BuildDirectorFacts(directorOutput),
+                        NpcProfiles = BuildNpcProfilesText(npcs),
+                        PlayerInventory = await BuildPlayerInventoryText(sessionId),
+                        MainQuestProgress = session.MainQuest ?? "",
+                        CharacterName = character?.Name ?? "",
+                        IsAdult = result.NarrativeInput?.IsAdult ?? false
+                    };
+                    using var cts = new CancellationTokenSource(CoachAnalyzeTimeout);
+                    // sessionRep 用 _sessionRep（ApplyCached 全程有效）；coach 经独立 scope 取得（AiCoordinatorService 未注入 PlayerCoachService）
+                    await EvaluateCoachAsync(sessionId, result, coachInput, applyRound, coach, _sessionRep, cts.Token);
+                }
+                catch (Exception cex)
+                {
+                    _logger.LogWarning(cex, "回放轮辅导员评估失败(不阻塞落库/记账链): SessionId={SessionId}", sessionId);
                 }
             }
         }
@@ -1052,18 +1090,59 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
         return sb.ToString();
     }
 
+    // 辅导员真实轮超时（high 档留足余量）：超时即取消 → AnalyzeAsync 返回 null → 书记官回退原始目标，不阻塞记账链
+    private static readonly TimeSpan CoachAnalyzeTimeout = TimeSpan.FromSeconds(20);
+
     /// <summary>
     /// 书记官后台记账Task：独立DI scope执行（防调用方scope提前销毁），
     /// 完成后回填 result 的 ScribeOutput/ItemHints/SuggestedActions/StateChanges；内部自捕异常永不抛。
     /// dryRun=true 时不落库，仅回填字段（供预计算缓存后回放时再落库）。
+    /// prevCoachState=调用时 session.CoachState：真实轮作辅导员上轮状态基准，预计算/退化轮作 next_focus 复用来源。
     /// </summary>
-    private Task RunScribeTaskAsync(long sessionId, GameActionResult result, ScribeInput scribeInput, int applyRound, bool dryRun, List<GameNpcProfile> npcs)
+    private Task RunScribeTaskAsync(long sessionId, GameActionResult result, ScribeInput scribeInput, int applyRound, bool dryRun, List<GameNpcProfile> npcs, string? prevCoachState)
     {
         return Task.Run(async () =>
         {
             try
             {
                 using var scope = _scopeFactory.CreateScope();
+
+                // 玩家辅导员嵌入（门控：仅 PlayerGoal 非空才唤起，空目标零成本、保持现状）——串在书记官之前
+                if (!string.IsNullOrWhiteSpace(scribeInput.PlayerGoal))
+                {
+                    if (!dryRun && !scribeInput.SuggestionsOnly)
+                    {
+                        // 真实推进轮：辅导员 Full 跑（high 档）→ 落库 CoachState（权威进度评估点）→ 拼装 CoachFocus 注入书记官。
+                        // 与书记官同源：WorldState(本轮开始前快照) + DirectorFacts 即本轮完整世界图景，无需等书记官落库。
+                        var coach = scope.ServiceProvider.GetRequiredService<PlayerCoachService>();
+                        var coachInput = new CoachInput
+                        {
+                            PlayerGoal = scribeInput.PlayerGoal!,
+                            PrevCoachState = prevCoachState,
+                            WorldState = scribeInput.WorldState,
+                            DirectorFacts = scribeInput.DirectorFacts,
+                            NpcProfiles = scribeInput.NpcProfiles,
+                            PlayerInventory = scribeInput.PlayerInventory,
+                            MainQuestProgress = scribeInput.MainQuestProgress,
+                            CharacterName = scribeInput.CharacterName,
+                            IsAdult = scribeInput.IsAdult
+                        };
+                        var coachSessionRep = scope.ServiceProvider.GetRequiredService<SqlSugarRepository<GameDungeonSession>>();
+                        using var cts = new CancellationTokenSource(CoachAnalyzeTimeout);
+                        // 评估核心逻辑与点选回放轮共用（EvaluateCoachAsync）：complete/failed 回填 CoachGoalEvent、active 回填 CoachState+落库。
+                        // 返回 null(超时/失败) → BuildCoachFocus(null)=null → 书记官回退原始目标（与原逻辑等价）。
+                        var coachState = await EvaluateCoachAsync(sessionId, result, coachInput, applyRound, coach, coachSessionRep, cts.Token);
+                        scribeInput.CoachFocus = PlayerCoachService.BuildCoachFocus(coachState);
+                    }
+                    else
+                    {
+                        // 预计算 DryRun / 不可行短路：世界不推进，跳过辅导员 LLM 调用，
+                        // 复用已落库 CoachState.next_focus 拼装 CoachFocus（无则 BuildCoachFocus 返回 null → 书记官回退原始目标）。
+                        var reusedState = PlayerCoachService.ParseState(prevCoachState);
+                        scribeInput.CoachFocus = PlayerCoachService.BuildCoachFocus(reusedState);
+                    }
+                }
+
                 var scribe = scope.ServiceProvider.GetRequiredService<ScribeAiService>();
                 var output = await scribe.ScribeAsync(scribeInput, sessionId);
                 if (output == null)
@@ -1128,6 +1207,79 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
     }
 
     /// <summary>
+    /// 辅导员评估核心逻辑（真实推进轮与点选回放轮共用）。
+    /// AnalyzeAsync → ToState → complete/failed 回填 result.CoachGoalEvent（不落库）；active 回填 result.CoachState 并落库。
+    /// 返回评估得到的 CoachState；output 为 null（超时/失败）时返回 null，调用方据此令书记官回退原始目标。
+    /// coach / sessionRep 由调用方按其 DI scope 传入，规避跨 scope 生命周期问题。
+    /// </summary>
+    private async Task<CoachState?> EvaluateCoachAsync(long sessionId, GameActionResult result, CoachInput coachInput, int applyRound, PlayerCoachService coach, SqlSugarRepository<GameDungeonSession> sessionRep, CancellationToken ct)
+    {
+        var coachOutput = await coach.AnalyzeAsync(coachInput, sessionId, ct);
+        if (coachOutput == null)
+        {
+            if (DebugEnabled)
+                AiDebugLogger.LogOrchestration("辅导员", $"超时/失败降级，书记官回退原始目标: SessionId={sessionId}");
+            return null;
+        }
+
+        var coachState = PlayerCoachService.ToState(coachOutput, applyRound);
+        var goalStatus = coachState.GoalStatus;
+
+        // 目标起始轮次：冷启动（无上轮状态，即 SetPlayerGoal 刚清空）时锚定当前轮；否则从上轮状态透传。
+        var prevCoach = PlayerCoachService.ParseState(coachInput.PrevCoachState);
+        var goalStartRound = (prevCoach != null && prevCoach.GoalStartRound > 0) ? prevCoach.GoalStartRound : applyRound;
+        coachState.GoalStartRound = goalStartRound;
+
+        if (goalStatus == CoachGoalStatus.Complete || goalStatus == CoachGoalStatus.Failed)
+        {
+            // 目标终结：回填事件供 Hub 推送“达成/受阻”+清空目标；不落库引导状态（生命周期已结束）。
+            // completion_check 达成依据经事件直传前端（ℹ️-C：不入 CoachState）。
+            result.CoachGoalEvent = new CoachGoalEvent
+            {
+                Status = goalStatus,
+                ClarifiedIntent = coachOutput.ClarifiedIntent,
+                Note = goalStatus == CoachGoalStatus.Complete ? coachOutput.CompletionCheck : coachOutput.ProgressNote
+            };
+        }
+        else
+        {
+            // 代码兜底：目标持续轮数达上限仍为 active → 强制超期归档（防提示词失灵导致目标被无限延续）。
+            var maxRounds = _modelFactory.MaxCoachGoalRounds;
+            var elapsedRounds = applyRound - goalStartRound + 1;
+            if (maxRounds > 0 && elapsedRounds >= maxRounds)
+            {
+                if (DebugEnabled)
+                    AiDebugLogger.LogOrchestration("辅导员", $"目标已持续{elapsedRounds}轮达上限{maxRounds}，强制超期归档: SessionId={sessionId}");
+                result.CoachGoalEvent = new CoachGoalEvent
+                {
+                    Status = CoachGoalStatus.Expired,
+                    ClarifiedIntent = coachOutput.ClarifiedIntent,
+                    Note = $"目标已持续 {elapsedRounds} 轮仍未达成"
+                };
+                return coachState;
+            }
+
+            // active：回填状态供 Hub 推送前端 chip 进度 + 落库供后续预计算 DryRun 复用 next_focus。
+            result.CoachState = coachState;
+            // 落库失败隔离：next_focus 已回填 result，本轮推送不受影响；仅下次 DryRun 复用不到，绝不阻塞记账链（§12）。
+            try
+            {
+                var coachStateJson = PlayerCoachService.SerializeState(coachState);
+                await sessionRep.AsUpdateable()
+                    .SetColumns(s => s.CoachState == coachStateJson)
+                    .Where(s => s.Id == sessionId)
+                    .ExecuteCommandAsync();
+            }
+            catch (Exception cex)
+            {
+                _logger.LogWarning(cex, "辅导员状态落库失败(不阻塞书记官): SessionId={SessionId}", sessionId);
+            }
+        }
+
+        return coachState;
+    }
+
+    /// <summary>
     /// 装配“仅产出建议选项”的书记官轻量输入（SuggestionsOnly=true）。
     /// 用于开场类场景（首次进入/重新开始/同题异卷重玩）与不可行短路补救：
     /// 以给定文本（开场叙事或拒绝叙事）作为[本轮既定事实]，复用 scribe_suggestions_system 提示词产出2个引导选项。
@@ -1154,7 +1306,9 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
             SuggestionsOnly = true,
             IsAdult = isAdult,
             // 开场/不可行短路补救场景同样尊重玩家已设置的目标（断线恢复/重开后目标仍生效）
-            PlayerGoal = session?.CurrentPlayerGoal
+            PlayerGoal = session?.CurrentPlayerGoal,
+            // 开场/不可行短路：复用已落库 CoachState.next_focus 引导选项（无则 BuildCoachFocus 返回 null → 书记官回退原始 PlayerGoal，ℹ️-B 阶段2）
+            CoachFocus = PlayerCoachService.BuildCoachFocus(PlayerCoachService.ParseState(session?.CoachState))
         };
     }
 
@@ -1207,9 +1361,9 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
     }
 
     // 叙事目标字数的安全区间：防止导演给出离谱值导致注水或过短
-    // 上限提高到3000以支持章节档（chapter）的整章叙事
+    // 上限提高到6000以支持章节档（chapter）的整章叙事
     private const int MinNarrativeWordTarget = 80;
-    private const int MaxNarrativeWordTarget = 3000;
+    private const int MaxNarrativeWordTarget = 6000;
 
     /// <summary>
     /// 解析本轮叙事目标字数：
@@ -1225,7 +1379,7 @@ public class AiCoordinatorService : IDynamicApiController, ITransient
         // 按节拍档位确定字数区间
         var (lo, hi) = scale switch
         {
-            "chapter" => (1800, 3000),
+            "chapter" => (4500, 6000),
             "normal" => (600, 1200),
             "micro" => (200, 600),
             _ => (0, 0) // 未分档：回退到旧的场景默认逻辑
